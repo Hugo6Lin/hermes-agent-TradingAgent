@@ -64,7 +64,8 @@ def test_technical_analyst_initialization():
 def test_compute_sma():
     prices = [10.0, 20.0, 30.0, 40.0, 50.0]
     sma = compute_sma(prices, 3)
-    assert sma == 30.0
+    # SMA returns average of last `period` prices: (30+40+50)/3 = 40.0
+    assert sma == 40.0
 
 
 def test_compute_rsi_edge_case_single_price():
