@@ -62,56 +62,9 @@ Hermes是一个智能股票研究助手，它像一支小型投资银行团队�
 
 ## 工作流程图
 
-```mermaid
-flowchart TB
-    subgraph input["📥 输入"]
-        A["🔍 输入股票代码<br/>AAPL / NVDA / TSLA..."]
-    end
+![Hermes Trading Agent 工作流程图](docs/workflow-diagram.png)
 
-    subgraph analysts["👥 5位AI分析师 并行研究"]
-        direction LR
-        B1["📈 Warren<br/>基本面"]
-        B2["📉 Chartist陈<br/>技术面"]
-        B3["😰 CrowdSense萨拉<br/>情绪面"]
-        B4["📰 NewsBot<br/>新闻面"]
-        B5["🌐 MacroMike<br/>宏观面"]
-    end
-
-    subgraph debate["⚔️ 多空辩论"]
-        direction TB
-        C1["🐂 Bull多方"]
-        C2["🐻 Bear空方"]
-    end
-
-    subgraph decision["🎯 研究总监裁决"]
-        D["👔 Claude Opus<br/>综合判断"]
-    end
-
-    subgraph output["📊 最终输出"]
-        direction LR
-        E1["🏆 S级"]
-        E2["✅ A级"]
-        E3["👀 B级"]
-        E4["⚠️ C级"]
-    end
-
-    A --> analysts
-    analysts --> debate
-    debate --> decision
-    decision --> output
-
-    style input fill:#1e3a5f,color:#fff,border:#00d4ff
-    style analysts fill:#4a1d7e,color:#fff,border:#a855f7
-    style debate fill:#7f1d1d,color:#fff,border:#ef4444
-    style decision fill:#14532d,color:#fff,border:#22c55e
-    style output fill:#1e3a5f,color:#fff,border:#ec4899
-
-    style B1 fill:#065f46,color:#fff
-    style B2 fill:#0e7490,color:#fff
-    style B3 fill:#7c3aed,color:#fff
-    style B4 fill:#be185d,color:#fff
-    style B5 fill:#0369a1,color:#fff
-```
+**查看完整设计稿：** [Figma 设计稿](https://www.figma.com/make/I6Afw6AHz6eq9iQfjcjYgk/Flowchart-Design-for-Trading-Agent?t=grIEn8yj7kf1dhqR-1)
 
 ---
 
