@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes Trading Agent 工作流程</title>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    min-height: 100vh;
+    padding: 40px 20px;
+  }
+
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .header {
+    text-align: center;
+    margin-bottom: 50px;
+  }
+
+  .header h1 {
+    color: #fff;
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #00d4ff, #7c3aed);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .header p {
+    color: #94a3b8;
+    font-size: 1.1rem;
+  }
+
+  .workflow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    flex-wrap: wrap;
+  }
+
+  .step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+  }
+
+  .step-box {
+    background: rgba(255, 255, 255, 0.05);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 25px 30px;
+    text-align: center;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .step-box::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--accent-start), var(--accent-end));
+  }
+
+  .step-box:hover {
+    transform: translateY(-5px);
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .step-number {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-bottom: 12px;
+    color: #fff;
+  }
+
+  .step-icon {
+    font-size: 2.5rem;
+    margin-bottom: 12px;
+  }
+
+  .step-title {
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .step-desc {
+    color: #94a3b8;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+
+  .step-role {
+    display: inline-block;
+    background: rgba(124, 58, 237, 0.3);
+    border: 1px solid rgba(124, 58, 237, 0.5);
+    color: #a78bfa;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    margin-top: 10px;
+  }
+
+  /* Analysts Grid */
+  .analysts-section {
+    margin: 50px 0;
+    text-align: center;
+  }
+
+  .section-title {
+    color: #fff;
+    font-size: 1.3rem;
+    margin-bottom: 25px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+  }
+
+  .section-title::before,
+  .section-title::after {
+    content: '';
+    height: 1px;
+    width: 60px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  }
+
+  .analysts-grid {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    flex-wrap: wrap;
+  }
+
+  .analyst-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 20px 25px;
+    min-width: 160px;
+    transition: all 0.3s ease;
+  }
+
+  .analyst-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .analyst-icon {
+    font-size: 2rem;
+    margin-bottom: 8px;
+  }
+
+  .analyst-name {
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+  }
+
+  .analyst-area {
+    color: #64748b;
+    font-size: 0.8rem;
+  }
+
+  /* Arrow */
+  .arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 15px;
+    color: #475569;
+    font-size: 1.5rem;
+  }
+
+  .arrow-down {
+    display: none;
+    padding: 15px 0;
+    color: #475569;
+    font-size: 1.5rem;
+  }
+
+  /* Ratings */
+  .ratings-section {
+    margin-top: 50px;
+    text-align: center;
+  }
+
+  .ratings-grid {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-top: 25px;
+  }
+
+  .rating-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 2px solid var(--border-color);
+    border-radius: 16px;
+    padding: 20px 30px;
+    min-width: 120px;
+    transition: all 0.3s ease;
+  }
+
+  .rating-card:hover {
+    transform: scale(1.05);
+  }
+
+  .rating-grade {
+    font-size: 2.5rem;
+    font-weight: 800;
+    margin-bottom: 5px;
+  }
+
+  .rating-meaning {
+    color: #94a3b8;
+    font-size: 0.85rem;
+    margin-bottom: 5px;
+  }
+
+  .rating-desc {
+    color: #64748b;
+    font-size: 0.75rem;
+  }
+
+  .rating-s { --border-color: #ffd700; --text-color: #ffd700; }
+  .rating-a { --border-color: #22c55e; --text-color: #22c55e; }
+  .rating-b { --border-color: #3b82f6; --text-color: #3b82f6; }
+  .rating-c { --border-color: #ef4444; --text-color: #ef4444; }
+
+  .rating-card .rating-grade { color: var(--text-color); }
+  .rating-card { border-color: var(--border-color); }
+
+  /* Footer */
+  .footer {
+    margin-top: 60px;
+    text-align: center;
+    color: #64748b;
+    font-size: 0.85rem;
+  }
+
+  .footer .disclaimer {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 20px;
+    max-width: 600px;
+    margin: 0 auto 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .workflow {
+      flex-direction: column;
+    }
+    .arrow {
+      display: none;
+    }
+    .arrow-down {
+      display: block;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🐐 Hermes Trading Agent</h1>
+      <p>你的AI股票研究团队 — 多空辩论 · 智能评级</p>
+    </div>
+
+    <div class="workflow">
+      <!-- Step 1: Input -->
+      <div class="step">
+        <div class="step-box" style="--accent-start: #00d4ff; --accent-end: #0099ff;">
+          <div class="step-number" style="background: linear-gradient(135deg, #00d4ff, #0099ff);">1</div>
+          <div class="step-icon">🔍</div>
+          <div class="step-title">输入股票代码</div>
+          <div class="step-desc">例如：AAPL<br>NVDA、TSLA...</div>
+        </div>
+      </div>
+
+      <div class="arrow">→</div>
+
+      <!-- Step 2: 5 Analysts -->
+      <div class="step">
+        <div class="step-box" style="--accent-start: #7c3aed; --accent-end: #a855f7;">
+          <div class="step-number" style="background: linear-gradient(135deg, #7c3aed, #a855f7);">2</div>
+          <div class="step-icon">👥</div>
+          <div class="step-title">5位分析师并行研究</div>
+          <div class="step-desc">基本面、技术面<br>情绪、新闻、宏观</div>
+          <div class="step-role">MiniMax 2.7</div>
+        </div>
+      </div>
+
+      <div class="arrow">→</div>
+
+      <!-- Step 3: Debate -->
+      <div class="step">
+        <div class="step-box" style="--accent-start: #f59e0b; --accent-end: #ef4444;">
+          <div class="step-number" style="background: linear-gradient(135deg, #f59e0b, #ef4444);">3</div>
+          <div class="step-icon">⚔️</div>
+          <div class="step-title">多空激烈辩论</div>
+          <div class="step-desc">Bull vs Bear<br>3轮深度辩论</div>
+          <div class="step-role">GPT-5.4</div>
+        </div>
+      </div>
+
+      <div class="arrow">→</div>
+
+      <!-- Step 4: Decision -->
+      <div class="step">
+        <div class="step-box" style="--accent-start: #22c55e; --accent-end: #10b981;">
+          <div class="step-number" style="background: linear-gradient(135deg, #22c55e, #10b981);">4</div>
+          <div class="step-icon">🎯</div>
+          <div class="step-title">研究总监裁决</div>
+          <div class="step-desc">综合论点<br>做出最终决策</div>
+          <div class="step-role">Claude Opus</div>
+        </div>
+      </div>
+
+      <div class="arrow">→</div>
+
+      <!-- Step 5: Rating -->
+      <div class="step">
+        <div class="step-box" style="--accent-start: #ec4899; --accent-end: #8b5cf6;">
+          <div class="step-number" style="background: linear-gradient(135deg, #ec4899, #8b5cf6);">5</div>
+          <div class="step-icon">📊</div>
+          <div class="step-title">输出评级</div>
+          <div class="step-desc">S/A/B/C<br>清晰投资建议</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analysts Detail -->
+    <div class="analysts-section">
+      <div class="section-title">5位AI分析师</div>
+      <div class="analysts-grid">
+        <div class="analyst-card">
+          <div class="analyst-icon">📈</div>
+          <div class="analyst-name">Warren分析师</div>
+          <div class="analyst-area">基本面 · 估值</div>
+        </div>
+        <div class="analyst-card">
+          <div class="analyst-icon">📉</div>
+          <div class="analyst-name">Chartist陈</div>
+          <div class="analyst-area">技术分析 · 图形</div>
+        </div>
+        <div class="analyst-card">
+          <div class="analyst-icon">😰</div>
+          <div class="analyst-name">CrowdSense萨拉</div>
+          <div class="analyst-area">市场情绪</div>
+        </div>
+        <div class="analyst-card">
+          <div class="analyst-icon">📰</div>
+          <div class="analyst-name">NewsBot新闻官</div>
+          <div class="analyst-area">突发事件</div>
+        </div>
+        <div class="analyst-card">
+          <div class="analyst-icon">🌐</div>
+          <div class="analyst-name">MacroMike宏观师</div>
+          <div class="analyst-area">行业赛道</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ratings -->
+    <div class="ratings-section">
+      <div class="section-title">S/A/B/C 评级系统</div>
+      <div class="ratings-grid">
+        <div class="rating-card rating-s">
+          <div class="rating-grade">S</div>
+          <div class="rating-meaning">绝佳机会</div>
+          <div class="rating-desc">必须关注</div>
+        </div>
+        <div class="rating-card rating-a">
+          <div class="rating-grade">A</div>
+          <div class="rating-meaning">值得买入</div>
+          <div class="rating-desc">逻辑清晰</div>
+        </div>
+        <div class="rating-card rating-b">
+          <div class="rating-grade">B</div>
+          <div class="rating-meaning">可以观察</div>
+          <div class="rating-desc">需更多验证</div>
+        </div>
+        <div class="rating-card rating-c">
+          <div class="rating-grade">C</div>
+          <div class="rating-meaning">谨慎参与</div>
+          <div class="rating-desc">风险较大</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <div class="disclaimer">
+        ⚠️ Hermes是研究工具，不是投资建议。AI分析仅供参考，市场有风险，投资需谨慎。
+      </div>
+      <div>MIT License · github.com/Hugo6Lin/hermes-agent-TradingAgent</div>
+    </div>
+  </div>
+</body>
+</html>
