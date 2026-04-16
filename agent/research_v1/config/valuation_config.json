@@ -1,0 +1,84 @@
+{
+  "business_models": {
+    "neo_bank": {
+      "description": "Digital-only banking services with no physical branches, typically targeting younger demographics and offering streamlined mobile-first experiences.",
+      "primary_metrics": ["NIM", "Cost of Funds", "Deposit Growth Rate", "NPA Ratio", "Tier 1 Capital Ratio"],
+      "secondary_metrics": ["Customer Acquisition Cost", "Monthly Active Users", "Loan-to-Deposit Ratio", "Fee Income Ratio"],
+      "red_flags": ["High loan loss provisions", "Regulatory actions", "Negative NIM compression", "Rapid asset quality deterioration"],
+      "business_detection": {
+        "keywords": ["digital bank", "neobank", "online bank", "mobile-first banking", "fintech lending", "digital lending platform"],
+        "bank_revenue_weight_threshold": 0.7
+      }
+    },
+    "pure_bank": {
+      "description": "Traditional commercial or retail banking with physical branch networks, offering deposit taking, lending, and other financial services.",
+      "primary_metrics": ["NIM", "Cost-to-Income Ratio", "CAR", "GNPA/NNPA", "PCR", "RoA", "RoE"],
+      "secondary_metrics": ["Casa Ratio", "Deposit Growth", "Advances Growth", "Fee Income", "Operating Profit"],
+      "red_flags": ["High NPAs", "Capital adequacy breach", "Regulatory penalties", "Fraud incidents", "Concentration risk"],
+      "business_detection": {
+        "keywords": ["commercial bank", "retail bank", "private bank", "public sector bank", "banking services", "financial institution"],
+        "bank_revenue_weight_threshold": 0.8
+      }
+    },
+    "saas": {
+      "description": "Software-as-a-Service companies providing cloud-based software solutions on a subscription model with recurring revenue.",
+      "primary_metrics": ["ARR Growth", "Gross Margin", "Net Revenue Retention", "CAC Payback Period", "Magic Number"],
+      "secondary_metrics": ["Free-to-Paid Conversion Rate", "Churn Rate", "Burn Multiple", "Rule of 40", "Enterprise Deal Size"],
+      "red_flags": ["Negative NRR", "Rising churn", "Margin compression", "Customer concentration", "Sales cycle elongation"],
+      "business_detection": {
+        "keywords": ["saas", "software as a service", "cloud software", "subscription software", "b2b software", "enterprise software"],
+        "bank_revenue_weight_threshold": 0.0
+      }
+    },
+    "ecommerce": {
+      "description": "Online retail platforms facilitating buying and selling of goods and services over the internet, including marketplaces and direct-to-consumer models.",
+      "primary_metrics": ["GMV Growth", "Take Rate", "Gross Margin", "Customer Acquisition Cost", "Repeat Purchase Rate"],
+      "secondary_metrics": ["Inventory Turnover", "Active Buyer Count", "Average Order Value", "Fulfillment Cost Ratio", "Marketing Spend Efficiency"],
+      "red_flags": ["Declining GMV", "Margin pressure", "High customer acquisition costs", "Logistics bottlenecks", "Seller churn"],
+      "business_detection": {
+        "keywords": ["e-commerce", "ecommerce", "online retail", "marketplace", "e-tailing", "dropshipping", "d2c", "direct to consumer"],
+        "bank_revenue_weight_threshold": 0.0
+      }
+    },
+    "consumer": {
+      "description": "Consumer goods companies manufacturing and selling branded products to end consumers through retail channels.",
+      "primary_metrics": ["Revenue Growth", "Gross Margin", "EBITDA Margin", "Market Share", "Return on Capital"],
+      "secondary_metrics": ["Inventory Turnover", "Working Capital Cycle", "Brand Power Scores", "Distribution Reach", "Pricing Power"],
+      "red_flags": ["Volume decline", "Margin erosion", "Inventory buildup", "Channel stuffing", "Brand dilution"],
+      "business_detection": {
+        "keywords": ["consumer goods", "fmcg", "personal care", "food beverage", "household products", "consumer brands", "retail products"],
+        "bank_revenue_weight_threshold": 0.0
+      }
+    },
+    "platform": {
+      "description": "Platform businesses creating network effects by connecting multiple sides of a market, including marketplaces, social platforms, and advertising platforms.",
+      "primary_metrics": ["Network Effects Strength", "Take Rate", "Monetization Efficiency", "DAU/MAU Ratio", "Cross-side Growth"],
+      "secondary_metrics": ["Engagement Metrics", "Seller/Buyer Concentration", "Platform Take Rate Trend", "Switching Cost Index"],
+      "red_flags": ["Network effect decay", "Regulatory scrutiny", "Competition from challengers", "Creator/expert churn", "Trust issues"],
+      "business_detection": {
+        "keywords": ["platform", "marketplace", "two-sided network", "social platform", "advertising platform", "sharing economy", "app store"],
+        "bank_revenue_weight_threshold": 0.0
+      }
+    },
+    "energy": {
+      "description": "Energy sector companies involved in exploration, production, refining, and distribution of oil, gas, renewables, and related services.",
+      "primary_metrics": ["Reserve Life Index", "Production Growth", "Operating Cost per Barrel", "Refinery Throughput", "Leverage Ratio"],
+      "secondary_metrics": ["Capex Efficiency", "Finding & Development Cost", "EBITDA per Barrel", "Portfolio Diversification", "Carbon Intensity"],
+      "red_flags": ["Reserve replacement failure", "Cost overruns", "Geopolitical disruptions", "Environmental liabilities", "Stranded asset risk"],
+      "business_detection": {
+        "keywords": ["oil gas", "energy company", "renewable energy", "solar energy", "wind energy", "upstream", "downstream", "refinery", "exploration production"],
+        "bank_revenue_weight_threshold": 0.0
+      }
+    },
+    "biotech": {
+      "description": "Biotechnology companies engaged in research, development, and commercialization of novel therapeutics, diagnostics, and healthcare innovations.",
+      "primary_metrics": ["Pipeline Value", "Cash Burn Rate", "Cash Runway", "Clinical Success Rate", "R&D Expense as % of Cash"],
+      "secondary_metrics": ["Indication Expansion Potential", "Partnership/ Licensing Activity", "Patent Portfolio Strength", "Regulatory Milestone Track Record"],
+      "red_flags": ["Trial failures", "Cash depletion", "FDA rejection", "Competition from generics", "IP disputes", "Key person departure"],
+      "business_detection": {
+        "keywords": ["biotech", "biotechnology", "pharmaceutical r&d", "drug development", "clinical stage", "life sciences", "novel therapeutics"],
+        "bank_revenue_weight_threshold": 0.0
+      }
+    }
+  }
+}
