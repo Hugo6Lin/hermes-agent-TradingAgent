@@ -62,9 +62,8 @@ Hermes是一个智能股票研究助手，它像一支小型投资银行团队�
 
 ## 工作流程图
 
-![Hermes Trading Agent 工作流程图](docs/workflow-diagram.png)
+<img width="1654" height="668" alt="image" src="https://github.com/user-attachments/assets/883fdcd5-0e6f-4382-9b46-371e58201533" />
 
-**查看完整设计稿：** [Figma 设计稿](https://www.figma.com/make/I6Afw6AHz6eq9iQfjcjYgk/Flowchart-Design-for-Trading-Agent?t=grIEn8yj7kf1dhqR-1)
 
 ---
 
