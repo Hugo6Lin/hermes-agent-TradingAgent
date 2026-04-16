@@ -92,7 +92,10 @@ class DebateManager:
         }
 
     def _detect_stalemate(self, history: list) -> bool:
-        """Detect if debate is stuck (same content hash twice).
+        """Detect if debate is stuck in a loop.
+
+        Uses novelty scoring to detect if new arguments are genuinely novel
+        or just rehashing of previous points.
 
         Args:
             history: List of debate round data.
@@ -103,9 +106,64 @@ class DebateManager:
         if len(history) < 2:
             return False
 
-        # Compare content hashes
-        return hash(history[-1]["bull"]["content"]) == hash(history[-2]["bull"]["content"]) and \
-               hash(history[-1]["bear"]["content"]) == hash(history[-2]["bear"]["content"])
+        # Quick check: exact content hash match
+        if hash(history[-1]["bull"]["content"]) == hash(history[-2]["bull"]["content"]) and \
+           hash(history[-1]["bear"]["content"]) == hash(history[-2]["bear"]["content"]):
+            return True
+
+        # Novelty scoring: check if new arguments bring anything new
+        bull_novelty = self._compute_novelty(history)
+        bear_novelty = self._compute_novelty(history, side="bear")
+
+        # If both sides show low novelty (< 0.2), we're in a stalemate
+        if bull_novelty < 0.2 and bear_novelty < 0.2:
+            return True
+
+        return False
+
+    def _compute_novelty(self, history: list, side: str = "bull") -> float:
+        """Compute novelty score for a side's latest argument.
+
+        Compares the latest argument against all previous arguments
+        to see how much new content is introduced.
+
+        Args:
+            history: List of debate round data.
+            side: "bull" or "bear".
+
+        Returns:
+            Novelty score from 0.0 (identical) to 1.0 (completely novel).
+        """
+        if len(history) < 2:
+            return 1.0
+
+        latest = history[-1][side].get("content", "")
+        latest_lower = latest.lower()
+
+        # Extract key phrases from latest (nouns, important terms)
+        import re
+        latest_words = set(re.findall(r'\b[a-z]{4,}\b', latest_lower))
+
+        # Compare against all previous rounds
+        total_overlap = 0.0
+        num_previous = len(history) - 1
+
+        for prev_round in history[:-1]:
+            prev_content = prev_round[side].get("content", "")
+            prev_lower = prev_content.lower()
+            prev_words = set(re.findall(r'\b[a-z]{4,}\b', prev_lower))
+
+            if prev_words:
+                # Jaccard similarity
+                intersection = latest_words & prev_words
+                union = latest_words | prev_words
+                similarity = len(intersection) / len(union) if union else 0
+                total_overlap += similarity
+
+        avg_overlap = total_overlap / num_previous if num_previous > 0 else 0
+
+        # Novelty is inverse of overlap
+        return max(0.0, min(1.0, 1.0 - avg_overlap))
 
     def _final_decision(self, debate_rounds: list) -> dict:
         """Make final decision using Research Manager (Claude Opus).

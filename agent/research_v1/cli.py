@@ -9,6 +9,9 @@ COMMAND_PATTERNS = [
     (r"显示我的自选股", "watchlist", {"action": "list"}),
     (r"(\w+)\s*(?:现在什么评级|评级)", "grade", {"symbol": lambda m: m.group(1)}),
     (r"系统状态", "status", {}),
+    (r"(/config|配置|查看配置|系统配置)", "config", {}),
+    (r"/config\s+set\s+(\w+)\s*=\s*(.+)", "config_set", {}),
+    (r"/config\s+get\s+(\w+)", "config_get", {}),
     (r"--help", "help", {}),
 ]
 
@@ -28,12 +31,22 @@ def parse_natural_language(text: str) -> ParsedCommand:
         match = re.match(pattern, text)
         if match:
             args = dict(static_args)
-            for key, extractor in static_args.items():
-                if callable(extractor) and extractor.__name__ == '<lambda>':
-                    try:
-                        args[key] = extractor(match)
-                    except:
-                        pass
+
+            # Handle /config set key=value
+            if cmd == "config_set":
+                args["key"] = match.group(1)
+                args["value"] = match.group(2)
+            # Handle /config get key
+            elif cmd == "config_get":
+                args["key"] = match.group(1)
+            # Handle lambda extractors for other patterns
+            else:
+                for key, extractor in static_args.items():
+                    if callable(extractor) and extractor.__name__ == '<lambda>':
+                        try:
+                            args[key] = extractor(match)
+                        except:
+                            pass
             return ParsedCommand(command=cmd, args=args)
 
     # Default: treat as analysis request

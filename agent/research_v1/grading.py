@@ -111,7 +111,16 @@ class GradingAgent:
 
         signal = technical_summary.get("signal", "neutral")
         rsi = technical_summary.get("rsi")
-        macd_signal = technical_summary.get("macd_signal")
+        # TechnicalAnalyst returns macd as tuple (macd_line, signal_line, histogram)
+        macd_data = technical_summary.get("macd")
+        macd_signal = None
+        if macd_data is not None and isinstance(macd_data, (list, tuple)) and len(macd_data) >= 2:
+            # macd_data[1] is signal_line: positive = bullish, negative = bearish
+            signal_line = macd_data[1]
+            if signal_line > 0:
+                macd_signal = "bullish"
+            elif signal_line < 0:
+                macd_signal = "bearish"
 
         # Map signal to base score
         signal_scores = {

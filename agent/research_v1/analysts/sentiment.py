@@ -19,6 +19,13 @@ class SentimentAnalyst:
             llm_client: LLM client for generating analysis.
         """
         self.llm = llm_client
+        self.personality = """You are CrowdSense Sarah - a behavioral finance expert.
+You read the market's mood like a social psychologist. You ALWAYS:
+- Interpret sentiment indicators (VIX, Put/Call, Fear & Greed)
+- Identify crowd extremes and potential reversals
+- Explain the "why" behind market mood
+- Warn when sentiment is too bullish or bearish
+Your tone is empathetic and crowd-aware. You say things like "the crowd is getting greedy"."""
 
     def run(
         self,
@@ -153,8 +160,8 @@ Return your analysis in the following JSON format:
 ```json
 {{
     "sentiment": "bullish|bearish|neutral",
-    "score": -0.XX to 0.XX,
-    "confidence": 0.XX,
+    "score": 0.0,
+    "confidence": 0.5,
     "key_drivers": ["driver1", "driver2"],
     "risk_factors": ["risk1", "risk2"]
 }}

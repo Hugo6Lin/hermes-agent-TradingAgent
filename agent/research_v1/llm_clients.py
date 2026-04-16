@@ -1,5 +1,6 @@
 """LLM client adapters for MiniMax, OpenAI, and Anthropic."""
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -16,6 +17,41 @@ class LLMResponse:
     output_tokens: int
     cost_estimate: float
     raw_response: dict
+
+
+def _retry_with_backoff(
+    func,
+    max_retries: int = 2,
+    initial_delay: float = 5.0,
+    backoff_factor: float = 2.0,
+):
+    """Retry a function with exponential backoff.
+
+    Args:
+        func: Function to retry.
+        max_retries: Maximum number of retries.
+        initial_delay: Initial delay in seconds.
+        backoff_factor: Multiplier for delay after each retry.
+
+    Returns:
+        Result of func call.
+
+    Raises:
+        The last exception if all retries fail.
+    """
+    last_exception = None
+    delay = initial_delay
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except (requests.exceptions.RequestException, TimeoutError) as exc:
+            last_exception = exc
+            if attempt < max_retries:
+                time.sleep(delay)
+                delay *= backoff_factor
+            else:
+                raise
+    raise last_exception
 
 
 def get_timeout_for_model(model: str) -> int:
@@ -70,11 +106,14 @@ class BaseLLMClient(ABC):
 class MiniMaxClient(BaseLLMClient):
     """MiniMax LLM client."""
 
+    DEFAULT_BASE_URL = "https://api.minimax.chat/v1"
+
     def __init__(
         self,
         api_key: str = None,
         model: str = "MiniMax-2.7",
-        timeout: int = 60
+        timeout: int = 60,
+        base_url: str = None
     ):
         """Initialize MiniMax client.
 
@@ -82,10 +121,13 @@ class MiniMaxClient(BaseLLMClient):
             api_key: MiniMax API key.
             model: Model name to use.
             timeout: Request timeout in seconds.
+            base_url: Base URL for API. Defaults to MINIMAX_BASE_URL env var or DEFAULT_BASE_URL.
         """
-        self.api_key = api_key
+        import os
+        self.api_key = api_key or os.getenv("MINIMAX_API_KEY", "")
         self.model = model
         self.timeout = timeout
+        self.base_url = base_url or os.getenv("MINIMAX_BASE_URL", self.DEFAULT_BASE_URL)
 
     @classmethod
     def provider_name(cls) -> str:
@@ -130,12 +172,15 @@ class MiniMaxClient(BaseLLMClient):
             "max_tokens": max_tokens
         }
 
-        response = requests.post(
-            "https://api.minimax.chat/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=self.timeout
-        )
+        def _call():
+            return requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=self.timeout
+            )
+
+        response = _retry_with_backoff(_call, max_retries=2, initial_delay=5.0, backoff_factor=2.0)
         response.raise_for_status()
         data = response.json()
 
@@ -152,11 +197,14 @@ class MiniMaxClient(BaseLLMClient):
 class OpenAIClient(BaseLLMClient):
     """OpenAI LLM client."""
 
+    DEFAULT_BASE_URL = "https://api.openai.com/v1"
+
     def __init__(
         self,
         api_key: str = None,
         model: str = "gpt-5.4",
-        timeout: int = 90
+        timeout: int = 90,
+        base_url: str = None
     ):
         """Initialize OpenAI client.
 
@@ -164,10 +212,13 @@ class OpenAIClient(BaseLLMClient):
             api_key: OpenAI API key.
             model: Model name to use.
             timeout: Request timeout in seconds.
+            base_url: Base URL for API. Defaults to OPENAI_BASE_URL env var or DEFAULT_BASE_URL.
         """
-        self.api_key = api_key
+        import os
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         self.model = model
         self.timeout = timeout
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", self.DEFAULT_BASE_URL)
 
     @classmethod
     def provider_name(cls) -> str:
@@ -212,12 +263,15 @@ class OpenAIClient(BaseLLMClient):
             "max_tokens": max_tokens
         }
 
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=self.timeout
-        )
+        def _call():
+            return requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=self.timeout
+            )
+
+        response = _retry_with_backoff(_call, max_retries=2, initial_delay=5.0, backoff_factor=2.0)
         response.raise_for_status()
         data = response.json()
 
@@ -234,11 +288,14 @@ class OpenAIClient(BaseLLMClient):
 class AnthropicClient(BaseLLMClient):
     """Anthropic LLM client."""
 
+    DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
+
     def __init__(
         self,
         api_key: str = None,
         model: str = "claude-opus-4-6",
-        timeout: int = 120
+        timeout: int = 120,
+        base_url: str = None
     ):
         """Initialize Anthropic client.
 
@@ -246,10 +303,13 @@ class AnthropicClient(BaseLLMClient):
             api_key: Anthropic API key.
             model: Model name to use.
             timeout: Request timeout in seconds.
+            base_url: Base URL for API. Defaults to ANTHROPIC_BASE_URL env var or DEFAULT_BASE_URL.
         """
-        self.api_key = api_key
+        import os
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
         self.model = model
         self.timeout = timeout
+        self.base_url = base_url or os.getenv("ANTHROPIC_BASE_URL", self.DEFAULT_BASE_URL)
 
     @classmethod
     def provider_name(cls) -> str:
@@ -306,12 +366,15 @@ class AnthropicClient(BaseLLMClient):
             "max_tokens": max_tokens
         }
 
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers=headers,
-            json=payload,
-            timeout=self.timeout
-        )
+        def _call():
+            return requests.post(
+                f"{self.base_url}/messages",
+                headers=headers,
+                json=payload,
+                timeout=self.timeout
+            )
+
+        response = _retry_with_backoff(_call, max_retries=2, initial_delay=5.0, backoff_factor=2.0)
         response.raise_for_status()
         data = response.json()
 

@@ -8,17 +8,26 @@ from agent.research_v1.llm_clients import BaseLLMClient
 class MonitorAgent:
     """Real-time portfolio monitoring."""
 
-    # Alert thresholds
-    ATR_MULTIPLIER = 2.5
-    VOLUME_MULTIPLIER = 3.0
+    # Default alert thresholds
+    DEFAULT_ATR_MULTIPLIER = 2.5
+    DEFAULT_VOLUME_MULTIPLIER = 3.0
 
-    def __init__(self, llm_client: BaseLLMClient):
+    def __init__(
+        self,
+        llm_client: BaseLLMClient,
+        atr_multiplier: float = None,
+        volume_multiplier: float = None
+    ):
         """Initialize MonitorAgent.
 
         Args:
             llm_client: LLM client for generating monitoring analysis.
+            atr_multiplier: ATR multiplier for price change alerts. Defaults to 2.5.
+            volume_multiplier: Volume multiplier for volume alerts. Defaults to 3.0.
         """
         self.llm = llm_client
+        self.atr_multiplier = atr_multiplier or self.DEFAULT_ATR_MULTIPLIER
+        self.volume_multiplier = volume_multiplier or self.DEFAULT_VOLUME_MULTIPLIER
 
     def check_alerts(
         self,
@@ -86,13 +95,13 @@ class MonitorAgent:
 
         if atr is not None and current_price is not None:
             atr_pct = (atr / current_price) * 100 if current_price > 0 else 0
-            price_threshold = atr_pct * self.ATR_MULTIPLIER
+            price_threshold = atr_pct * self.atr_multiplier
 
             if abs(price_change) > price_threshold:
                 alerts.append({
                     "type": "technical",
                     "severity": "RED" if abs(price_change) > price_threshold * 1.5 else "ORANGE",
-                    "description": f"Price change {price_change:.2f}% exceeds {self.ATR_MULTIPLIER}x ATR threshold",
+                    "description": f"Price change {price_change:.2f}% exceeds {self.atr_multiplier}x ATR threshold",
                     "metric": "price_atr"
                 })
 
@@ -100,7 +109,7 @@ class MonitorAgent:
         volume = current_data.get("volume", 0)
         avg_volume = current_data.get("avg_volume", 0)
 
-        if avg_volume > 0 and volume > avg_volume * self.VOLUME_MULTIPLIER:
+        if avg_volume > 0 and volume > avg_volume * self.volume_multiplier:
             alerts.append({
                 "type": "technical",
                 "severity": "ORANGE",
