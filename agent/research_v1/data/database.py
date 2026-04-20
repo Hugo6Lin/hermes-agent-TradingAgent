@@ -111,6 +111,97 @@ class ResearchDatabase:
             )
         """)
 
+        # signals table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS signals (
+                signal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER,
+                symbol TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                entry_price REAL NOT NULL,
+                stop_loss REAL NOT NULL,
+                take_profit REAL NOT NULL,
+                holding_horizon TEXT NOT NULL,
+                signal_valid_until TEXT NOT NULL,
+                priority_score REAL NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id) REFERENCES analysis_tasks(task_id)
+            )
+        """)
+
+        # price_snapshots table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS price_snapshots (
+                snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER,
+                symbol TEXT NOT NULL,
+                price REAL NOT NULL,
+                snapshot_type TEXT NOT NULL,
+                captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
+            )
+        """)
+
+        # signal_revisions table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS signal_revisions (
+                revision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL,
+                previous_grade TEXT,
+                new_grade TEXT NOT NULL,
+                revision_reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
+            )
+        """)
+
+        # signal_outcomes table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS signal_outcomes (
+                outcome_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL,
+                horizon_days INTEGER NOT NULL,
+                exit_price REAL NOT NULL,
+                return_pct REAL NOT NULL,
+                max_drawdown_pct REAL NOT NULL,
+                win BOOLEAN NOT NULL,
+                gap_handled BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
+            )
+        """)
+
+        # positions table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS positions (
+                position_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                quantity REAL NOT NULL,
+                stop_loss REAL NOT NULL,
+                take_profit REAL NOT NULL,
+                status TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
+            )
+        """)
+
+        # paper_trades table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS paper_trades (
+                paper_trade_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                quantity REAL NOT NULL,
+                status TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
+            )
+        """)
+
         conn.commit()
         conn.close()
 
@@ -241,6 +332,138 @@ class ResearchDatabase:
 
         return dict(row)
 
+    def get_signal(self, signal_id: int) -> Optional[dict]:
+        """Get signal by ID."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM signals WHERE signal_id = ?", (signal_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row is not None else None
+
+    def list_recent_signals(self, limit: int = 20) -> list[dict]:
+        """List recent signals ordered by newest first, then priority."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM signals
+            ORDER BY created_at DESC, priority_score DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_signal_outcomes(self, signal_id: int) -> list[dict]:
+        """Get all persisted outcomes for a signal ordered by horizon."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM signal_outcomes WHERE signal_id = ? ORDER BY horizon_days",
+            (signal_id,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_signal_outcomes_with_grade(self, horizon_days: int | None = None) -> list[dict]:
+        """Get persisted outcomes joined with signal grade."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if horizon_days is None:
+            cursor.execute(
+                """
+                SELECT o.*, s.grade
+                FROM signal_outcomes o
+                JOIN signals s ON s.signal_id = o.signal_id
+                ORDER BY o.horizon_days, o.outcome_id
+                """
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT o.*, s.grade
+                FROM signal_outcomes o
+                JOIN signals s ON s.signal_id = o.signal_id
+                WHERE o.horizon_days = ?
+                ORDER BY o.outcome_id
+                """,
+                (horizon_days,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_position(self, position_id: int) -> Optional[dict]:
+        """Get a tracked position by ID."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM positions WHERE position_id = ?", (position_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row is not None else None
+
+    def list_positions(self, status: str | None = None, limit: int = 50) -> list[dict]:
+        """List tracked positions, optionally filtered by status."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if status is None:
+            cursor.execute(
+                "SELECT * FROM positions ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT * FROM positions
+                WHERE status = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (status, limit),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_paper_trade(self, paper_trade_id: int) -> Optional[dict]:
+        """Get a paper trade by ID."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM paper_trades WHERE paper_trade_id = ?",
+            (paper_trade_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row is not None else None
+
+    def list_paper_trades(self, status: str | None = None, limit: int = 50) -> list[dict]:
+        """List paper trades, optionally filtered by status."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if status is None:
+            cursor.execute(
+                "SELECT * FROM paper_trades ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT * FROM paper_trades
+                WHERE status = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (status, limit),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
     def update_task_status(self, task_id: int, status: str, grade: str = None, composite_score: float = None) -> None:
         """Update task status, grade, and composite score."""
         conn = self._get_connection()
@@ -283,6 +506,184 @@ class ResearchDatabase:
         conn.close()
         return report_id
 
+    def save_signal(self, task_id: int, signal: dict) -> int:
+        """Save a structured signal. Returns signal_id."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO signals (
+                task_id, symbol, grade, confidence, entry_price, stop_loss,
+                take_profit, holding_horizon, signal_valid_until, priority_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task_id,
+                signal["symbol"],
+                signal["grade"],
+                signal["confidence"],
+                signal["entry_price"],
+                signal["stop_loss"],
+                signal["take_profit"],
+                signal["holding_horizon"],
+                signal["signal_valid_until"],
+                signal["priority_score"],
+            )
+        )
+        signal_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return signal_id
+
+    def save_price_snapshot(
+        self,
+        signal_id: int,
+        symbol: str,
+        price: float,
+        snapshot_type: str
+    ) -> int:
+        """Save a price snapshot linked to a signal. Returns snapshot_id."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO price_snapshots (signal_id, symbol, price, snapshot_type)
+            VALUES (?, ?, ?, ?)
+            """,
+            (signal_id, symbol, price, snapshot_type)
+        )
+        snapshot_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return snapshot_id
+
+    def save_signal_revision(
+        self,
+        signal_id: int,
+        previous_grade: str | None,
+        new_grade: str,
+        revision_reason: str | None = None
+    ) -> int:
+        """Save a signal grade revision. Returns revision_id."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO signal_revisions (
+                signal_id, previous_grade, new_grade, revision_reason
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (signal_id, previous_grade, new_grade, revision_reason)
+        )
+        revision_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return revision_id
+
+    def save_signal_bundle(self, task_id: int, grade_result: dict) -> dict:
+        """Persist a grade result's signal and its entry price snapshot."""
+        signal_payload = dict(grade_result["signal"])
+        signal_payload["grade"] = grade_result["grade"]
+
+        signal_id = self.save_signal(task_id=task_id, signal=signal_payload)
+        snapshot_id = self.save_price_snapshot(
+            signal_id=signal_id,
+            symbol=signal_payload["symbol"],
+            price=signal_payload["entry_price"],
+            snapshot_type="signal_entry",
+        )
+
+        return {
+            "signal_id": signal_id,
+            "snapshot_id": snapshot_id,
+        }
+
+    def save_signal_outcome(
+        self,
+        signal_id: int,
+        horizon_days: int,
+        exit_price: float,
+        return_pct: float,
+        max_drawdown_pct: float,
+        win: bool,
+        gap_handled: bool
+    ) -> int:
+        """Persist a computed signal outcome. Returns outcome_id."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO signal_outcomes (
+                signal_id, horizon_days, exit_price, return_pct,
+                max_drawdown_pct, win, gap_handled
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                signal_id,
+                horizon_days,
+                exit_price,
+                return_pct,
+                max_drawdown_pct,
+                int(win),
+                int(gap_handled),
+            )
+        )
+        outcome_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return outcome_id
+
+    def open_position(
+        self,
+        signal_id: int,
+        symbol: str,
+        entry_price: float,
+        quantity: float,
+        stop_loss: float,
+        take_profit: float,
+        status: str,
+    ) -> int:
+        """Persist an opened position generated from a trade plan."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO positions (
+                signal_id, symbol, entry_price, quantity,
+                stop_loss, take_profit, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (signal_id, symbol, entry_price, quantity, stop_loss, take_profit, status),
+        )
+        position_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return position_id
+
+    def save_paper_trade(
+        self,
+        signal_id: int,
+        symbol: str,
+        entry_price: float,
+        quantity: float,
+        status: str,
+    ) -> int:
+        """Persist a simulated trade for paper-trading validation."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO paper_trades (
+                signal_id, symbol, entry_price, quantity, status
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (signal_id, symbol, entry_price, quantity, status),
+        )
+        paper_trade_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return paper_trade_id
+
     def create_watchlist(self, name: str, user_id: str = "default") -> int:
         """Create a new watchlist. Returns list_id."""
         conn = self._get_connection()
@@ -320,6 +721,39 @@ class ResearchDatabase:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def list_recent_alerts(self, unread_only: bool = False, limit: int = 50) -> list[dict]:
+        """List recent alerts across watchlists."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            if unread_only:
+                cursor.execute(
+                    """
+                    SELECT * FROM alert_history
+                    WHERE is_read = 0
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT * FROM alert_history
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc):
+                return []
+            raise
+        finally:
+            conn.close()
 
     def record_token_usage(self, task_id: int, agent_type: str, model: str, input_tokens: int, output_tokens: int, cost: float) -> None:
         """Record token usage for a task."""

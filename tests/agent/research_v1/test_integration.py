@@ -17,6 +17,9 @@ from agent.research_v1.reviewer import ReviewerAgent
 from agent.research_v1.monitor import MonitorAgent
 from agent.research_v1.data.database import ResearchDatabase
 from agent.research_v1.llm_clients import LLMResponse
+from agent.research_v1.paper_trade import PaperTradeEngine
+from agent.research_v1.signal_pipeline import SignalPersistencePipeline
+from agent.research_v1.trade_plan import TradePlanGenerator
 
 
 def create_mock_llm_response(content: str) -> Mock:
@@ -244,6 +247,121 @@ def test_grading_agent_grade():
     result = grader.grade(research_decision, {})
     assert "grade" in result
     assert "composite_score" in result
+
+
+def test_signal_persistence_pipeline_saves_grading_result():
+    """Test grading output can be persisted through the signal pipeline."""
+    mock_client = create_mock_llm_response("Grading complete.")
+    grader = GradingAgent(llm_client=mock_client)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test.db")
+        db = ResearchDatabase(db_path)
+        db.initialize()
+        task_id = db.create_task("AAPL", "2026-04-17", "morning")
+
+        grade_result = grader.grade(
+            research_decision={
+                "symbol": "AAPL",
+                "market_data": {"price": 186.5},
+                "fundamentals_summary": {"verdict": "buy", "confidence": 0.8},
+                "technical_summary": {"signal": "buy"},
+                "industry_summary": {"trend": "bullish"},
+                "macro_data": {"trend": "bullish"}
+            },
+            analyst_reports={}
+        )
+
+        pipeline = SignalPersistencePipeline(database=db)
+        persisted = pipeline.persist_grade_result(task_id=task_id, grade_result=grade_result)
+
+        task = db.get_task(task_id)
+        assert persisted["signal_id"] > 0
+        assert persisted["snapshot_id"] > 0
+        assert task["grade"] == grade_result["grade"]
+        assert task["composite_score"] == grade_result["composite_score"]
+
+
+def test_signal_to_trade_plan_to_position_flow():
+    """Turn a persisted signal into a trade plan and tracked position."""
+    mock_client = create_mock_llm_response("Grading complete.")
+    grader = GradingAgent(llm_client=mock_client)
+    generator = TradePlanGenerator()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test.db")
+        db = ResearchDatabase(db_path)
+        db.initialize()
+        task_id = db.create_task("AAPL", "2026-04-17", "morning")
+
+        grade_result = grader.grade(
+            research_decision={
+                "symbol": "AAPL",
+                "market_data": {"price": 186.5},
+                "fundamentals_summary": {"verdict": "buy", "confidence": 0.8},
+                "technical_summary": {"signal": "buy"},
+                "industry_summary": {"trend": "bullish"},
+                "macro_data": {"trend": "bullish"}
+            },
+            analyst_reports={}
+        )
+
+        persistence = SignalPersistencePipeline(database=db)
+        persisted = persistence.persist_grade_result(task_id=task_id, grade_result=grade_result)
+        plan = generator.generate(signal=grade_result["signal"], grade=grade_result["grade"])
+        position_id = db.open_position(
+            signal_id=persisted["signal_id"],
+            symbol=plan["symbol"],
+            entry_price=plan["entry_zone"]["mid"],
+            quantity=plan["suggested_position_size"],
+            stop_loss=plan["stop_loss"],
+            take_profit=plan["take_profit"],
+            status="open",
+        )
+
+        position = db.get_position(position_id)
+        assert persisted["signal_id"] > 0
+        assert plan["action"] == "BUY"
+        assert position["status"] == "open"
+        assert position["signal_id"] == persisted["signal_id"]
+
+
+def test_signal_to_paper_trade_flow():
+    """Simulate a trade from a generated plan before live adoption."""
+    mock_client = create_mock_llm_response("Grading complete.")
+    grader = GradingAgent(llm_client=mock_client)
+    generator = TradePlanGenerator()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test.db")
+        db = ResearchDatabase(db_path)
+        db.initialize()
+        task_id = db.create_task("AAPL", "2026-04-17", "morning")
+
+        grade_result = grader.grade(
+            research_decision={
+                "symbol": "AAPL",
+                "market_data": {"price": 186.5},
+                "fundamentals_summary": {"verdict": "buy", "confidence": 0.8},
+                "technical_summary": {"signal": "buy"},
+                "industry_summary": {"trend": "bullish"},
+                "macro_data": {"trend": "bullish"}
+            },
+            analyst_reports={}
+        )
+
+        persistence = SignalPersistencePipeline(database=db)
+        persisted = persistence.persist_grade_result(task_id=task_id, grade_result=grade_result)
+        plan = generator.generate(signal=grade_result["signal"], grade=grade_result["grade"])
+        engine = PaperTradeEngine(database=db)
+        paper_trade = engine.simulate_from_plan(
+            signal_id=persisted["signal_id"],
+            plan=plan,
+        )
+
+        assert paper_trade["paper_trade_id"] > 0
+        assert paper_trade["status"] == "open"
+        assert paper_trade["signal_id"] == persisted["signal_id"]
 
 
 def test_monitor_technical_triggers():

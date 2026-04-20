@@ -11,6 +11,9 @@ class MonitorAgent:
     # Default alert thresholds
     DEFAULT_ATR_MULTIPLIER = 2.5
     DEFAULT_VOLUME_MULTIPLIER = 3.0
+    # Backward-compatible aliases expected by the current test suite.
+    ATR_MULTIPLIER = DEFAULT_ATR_MULTIPLIER
+    VOLUME_MULTIPLIER = DEFAULT_VOLUME_MULTIPLIER
 
     def __init__(
         self,
@@ -60,6 +63,10 @@ class MonitorAgent:
         technical_alerts = self._check_technical_triggers(current_data)
         alerts.extend(technical_alerts)
 
+        # Check decision triggers tied to an open position.
+        decision_alerts = self._check_position_triggers(current_data, position_data)
+        alerts.extend(decision_alerts)
+
         # Check fundamental triggers
         fundamental_alerts = self._check_fundamental_triggers(current_data)
         alerts.extend(fundamental_alerts)
@@ -76,6 +83,37 @@ class MonitorAgent:
             "alerts": alerts,
             "alert_level": alert_level
         }
+
+    def _check_position_triggers(self, current_data: dict, position_data: dict | None) -> list:
+        """Check take-profit and stop-loss thresholds for an open position."""
+        if not position_data or position_data.get("status") != "open":
+            return []
+
+        current_price = current_data.get("price")
+        if current_price is None:
+            return []
+
+        alerts = []
+        stop_loss = position_data.get("stop_loss")
+        take_profit = position_data.get("take_profit")
+
+        if take_profit is not None and current_price >= take_profit:
+            alerts.append({
+                "type": "decision",
+                "severity": "ORANGE",
+                "description": f"Price {current_price:.2f} reached take-profit {take_profit:.2f}",
+                "metric": "take_profit",
+            })
+
+        if stop_loss is not None and current_price <= stop_loss:
+            alerts.append({
+                "type": "decision",
+                "severity": "RED",
+                "description": f"Price {current_price:.2f} broke stop-loss {stop_loss:.2f}",
+                "metric": "stop_loss",
+            })
+
+        return alerts
 
     def _check_technical_triggers(self, current_data: dict) -> list:
         """Check technical triggers.

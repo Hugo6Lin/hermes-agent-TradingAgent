@@ -227,7 +227,10 @@ def test_build_valuation_prompt():
         "pb": 2.5,
         "ps": 3.0,
         "roe": 0.15,
-        "roic": 0.12
+        "roic": 0.12,
+        "dcf_value": 150.0,
+        "ddm_value": 48.0,
+        "relative_value": 72.0,
     }
 
     prompt = analyst.build_valuation_prompt("AAPL", metrics, "standard")
@@ -236,6 +239,8 @@ def test_build_valuation_prompt():
     assert len(prompt) > 0
     # AAPL should be in the user message (prompt[1]), not the system message (prompt[0])
     assert "AAPL" in prompt[1]["content"]
+    assert "DCF" in prompt[1]["content"]
+    assert "Relative Valuation" in prompt[1]["content"]
 
 
 def test_run_method():

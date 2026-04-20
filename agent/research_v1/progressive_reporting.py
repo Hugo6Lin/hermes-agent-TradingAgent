@@ -6,10 +6,15 @@ ensuring users always get something useful.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_iso() -> str:
+    """Return a timezone-aware UTC timestamp in ISO format."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass
@@ -30,8 +35,8 @@ class ProgressiveReport:
     version: int = 1  # Version number, increments with each update
     is_complete: bool = False
     is_degraded: bool = False
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=_utc_now_iso)
+    updated_at: str = field(default_factory=_utc_now_iso)
 
     def add_section(self, name: str, title: str, content: str, completeness: float = 1.0, source: str = "unknown") -> None:
         """Add or update a section in the report.
@@ -49,7 +54,7 @@ class ProgressiveReport:
             completeness=completeness,
             source=source
         )
-        self.updated_at = datetime.utcnow().isoformat()
+        self.updated_at = _utc_now_iso()
 
     def get_section(self, name: str) -> Optional[ReportSection]:
         """Get a section by name.
@@ -75,12 +80,12 @@ class ProgressiveReport:
     def mark_complete(self) -> None:
         """Mark the report as fully complete."""
         self.is_complete = True
-        self.updated_at = datetime.utcnow().isoformat()
+        self.updated_at = _utc_now_iso()
 
     def mark_degraded(self) -> None:
         """Mark the report as degraded (partial results)."""
         self.is_degraded = True
-        self.updated_at = datetime.utcnow().isoformat()
+        self.updated_at = _utc_now_iso()
 
     def to_markdown(self) -> str:
         """Convert report to Markdown format.

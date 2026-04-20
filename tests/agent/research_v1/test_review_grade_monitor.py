@@ -6,6 +6,8 @@ from unittest.mock import Mock
 from agent.research_v1.reviewer import ReviewerAgent
 from agent.research_v1.grading import GradingAgent
 from agent.research_v1.monitor import MonitorAgent
+from agent.research_v1.notifications import NotificationDispatcher
+from agent.research_v1.trade_plan import TradePlanGenerator
 
 
 class MockLLMClient(Mock):
@@ -152,6 +154,79 @@ def test_grading_returns_all_scores():
     assert "composite_score" in result
 
 
+def test_grading_returns_structured_signal_fields():
+    """Test grade method returns structured signal fields for execution."""
+    grader = GradingAgent(llm_client=Mock())
+    result = grader.grade(
+        research_decision={
+            "symbol": "AAPL",
+            "market_data": {"price": 150.0},
+            "fundamentals_summary": {"verdict": "buy", "confidence": 0.9},
+            "technical_summary": {"signal": "buy", "rsi": 45},
+            "industry_summary": {"trend": "bullish"},
+            "macro_data": {"trend": "bullish"},
+        },
+        analyst_reports={}
+    )
+
+    assert "signal" in result
+    assert result["signal"]["symbol"] == "AAPL"
+    assert result["signal"]["entry_price"] == 150.0
+    assert result["signal"]["stop_loss"] is not None
+    assert result["signal"]["take_profit"] is not None
+    assert result["signal"]["holding_horizon"] in ["5d", "20d", "60d"]
+    assert result["signal"]["signal_valid_until"] is not None
+    assert result["signal"]["priority_score"] is not None
+
+
+def test_grading_applies_stress_penalty_to_confidence_and_priority():
+    """Stress regime weakness should reduce final signal confidence and priority."""
+    grader = GradingAgent(llm_client=Mock())
+    result = grader.grade(
+        research_decision={
+            "symbol": "AAPL",
+            "market_data": {"price": 150.0},
+            "fundamentals_summary": {"verdict": "buy", "confidence": 0.9},
+            "technical_summary": {"signal": "buy", "rsi": 45},
+            "industry_summary": {"trend": "bullish"},
+            "macro_data": {"trend": "bullish"},
+            "stress_evaluation": {
+                "has_critical_regime": True,
+                "confidence_penalty": 0.12,
+                "warning_summary": "Stress warning: 2008 crisis breached drawdown limit.",
+            },
+        },
+        analyst_reports={}
+    )
+
+    assert result["signal"]["confidence"] < round(result["composite_score"] / 100, 4)
+    assert result["signal"]["priority_score"] < round(result["composite_score"], 2)
+    assert "Stress warning" in result["signal"]["warnings"][0]
+
+
+def test_trade_plan_generator_builds_executable_buy_plan():
+    """Build a trade plan from a strong signal."""
+    generator = TradePlanGenerator()
+    plan = generator.generate(
+        signal={
+            "symbol": "AAPL",
+            "entry_price": 150.0,
+            "stop_loss": 139.5,
+            "take_profit": 168.0,
+            "holding_horizon": "20d",
+            "confidence": 0.84,
+            "priority_score": 84.7,
+        },
+        grade="S",
+    )
+
+    assert plan["action"] == "BUY"
+    assert plan["symbol"] == "AAPL"
+    assert plan["entry_zone"]["low"] <= 150.0 <= plan["entry_zone"]["high"]
+    assert plan["suggested_position_size"] > 0
+    assert plan["invalidation_condition"] is not None
+
+
 def test_grading_score_fundamentals():
     """Test fundamentals scoring."""
     grader = GradingAgent(llm_client=Mock())
@@ -292,3 +367,49 @@ def test_monitor_alert_levels():
     # Should return proper alert level values
     result = monitor.check_alerts("AAPL", {})
     assert result["alert_level"] in ["RED", "ORANGE", "YELLOW", "none"]
+
+
+def test_monitor_emits_take_profit_decision_alert():
+    """Emit a decision alert when price reaches trade-plan take-profit."""
+    monitor = MonitorAgent(llm_client=Mock())
+    result = monitor.check_alerts(
+        "AAPL",
+        {"price": 170.0, "price_change_pct": 2.0},
+        position_data={"entry_price": 150.0, "stop_loss": 139.5, "take_profit": 168.0, "status": "open"},
+    )
+    assert any(alert["metric"] == "take_profit" for alert in result["alerts"])
+    assert result["alert_level"] in ["ORANGE", "RED"]
+
+
+def test_monitor_emits_stop_loss_decision_alert():
+    """Emit a decision alert when price breaks stop-loss."""
+    monitor = MonitorAgent(llm_client=Mock())
+    result = monitor.check_alerts(
+        "AAPL",
+        {"price": 138.0, "price_change_pct": -4.0},
+        position_data={"entry_price": 150.0, "stop_loss": 139.5, "take_profit": 168.0, "status": "open"},
+    )
+    assert any(alert["metric"] == "stop_loss" for alert in result["alerts"])
+    assert result["alert_level"] == "RED"
+
+
+def test_notification_dispatcher_formats_actionable_alert_message():
+    """Format a concise actionable alert notification payload."""
+    dispatcher = NotificationDispatcher()
+    payload = dispatcher.build_alert_payload(
+        symbol="AAPL",
+        alert_result={
+            "alert_level": "RED",
+            "alerts": [
+                {
+                    "metric": "stop_loss",
+                    "description": "Price 138.00 broke stop-loss 139.50",
+                    "severity": "RED",
+                }
+            ],
+        },
+    )
+
+    assert "AAPL" in payload["title"]
+    assert "RED" in payload["title"]
+    assert "stop_loss" in payload["message"]

@@ -75,6 +75,6 @@
   <text x="868" y="593" fill="#425D56" font-size="16" font-family="Segoe UI, Arial, sans-serif">后台轮询、决策告警、收盘后摘要</text>
 
   <text x="76" y="660" fill="#8DB2A8" font-size="18" font-family="Segoe UI, Arial, sans-serif">
-    Research -&gt; Structured Signal -&gt; Backtest -&gt; Trade Plan -&gt; Viewer / Alert / Service
+    Research -> Structured Signal -> Backtest -> Trade Plan -> Viewer / Alert / Service
   </text>
 </svg>

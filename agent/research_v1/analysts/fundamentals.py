@@ -5,6 +5,11 @@ import re
 from typing import Any
 
 from agent.research_v1.llm_clients import BaseLLMClient
+from agent.research_v1.valuation_models import (
+    calculate_dcf_value,
+    calculate_ddm_value,
+    calculate_relative_valuation,
+)
 
 
 class FundamentalsAnalyst:
@@ -294,8 +299,48 @@ Your tone is professional and data-driven. You rarely get excited."""
         # Additional useful metrics
         metrics["market_cap"] = market_data.get("market_cap")
         metrics["price"] = market_data.get("price")
+        metrics["dcf_value"] = self._calculate_dcf_snapshot(cashflow_data)
+        metrics["ddm_value"] = self._calculate_ddm_snapshot(cashflow_data)
+        metrics["relative_value"] = self._calculate_relative_snapshot(market_data)
 
         return metrics
+
+    def _calculate_dcf_snapshot(self, cashflow_data: dict) -> float | None:
+        """Calculate a compact DCF enterprise value snapshot when projections exist."""
+        free_cash_flows = cashflow_data.get("free_cash_flow_projection")
+        if not free_cash_flows:
+            return None
+
+        dcf_result = calculate_dcf_value(
+            free_cash_flows=free_cash_flows,
+            discount_rate=cashflow_data.get("discount_rate", 0.10),
+            terminal_growth_rate=cashflow_data.get("terminal_growth_rate", 0.03),
+        )
+        return dcf_result["enterprise_value"]
+
+    def _calculate_ddm_snapshot(self, cashflow_data: dict) -> float | None:
+        """Calculate a compact DDM intrinsic value when dividend inputs exist."""
+        annual_dividend = cashflow_data.get("annual_dividend")
+        if annual_dividend is None:
+            return None
+
+        ddm_result = calculate_ddm_value(
+            annual_dividend=annual_dividend,
+            cost_of_equity=cashflow_data.get("cost_of_equity", 0.09),
+            dividend_growth_rate=cashflow_data.get("dividend_growth_rate", 0.03),
+        )
+        return ddm_result["intrinsic_value"]
+
+    def _calculate_relative_snapshot(self, market_data: dict) -> float | None:
+        """Calculate a compact blended relative-valuation target when inputs exist."""
+        relative_result = calculate_relative_valuation(
+            market_data=market_data,
+            benchmark_multiples=market_data.get(
+                "benchmark_multiples",
+                {"pe": 18.0, "pb": 3.0, "ps": 4.0},
+            ),
+        )
+        return relative_result["target_price"]
 
     def build_valuation_prompt(
         self,
@@ -325,6 +370,9 @@ Key Financial Metrics:
 - ROIC (Return on Invested Capital): {metrics.get('roic', 'N/A')}
 - Debt/Equity: {metrics.get('debt_to_equity', 'N/A')}
 - Cash Flow Match: {metrics.get('cash_flow_match', 'N/A')}
+- DCF Value: {metrics.get('dcf_value', 'N/A')}
+- DDM Value: {metrics.get('ddm_value', 'N/A')}
+- Relative Valuation: {metrics.get('relative_value', 'N/A')}
 
 Analyze the fundamentals and provide:
 1. A brief valuation assessment (1-2 sentences)
