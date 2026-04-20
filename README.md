@@ -207,7 +207,7 @@ python -m agent.research_v1.viewer
 - `service_manager.py` / `macos_service.py`：服务模式
 - `viewer.py`：极简查看入口
 
-系统主线规划见 [roadmap.md](roadmap.md)，更完整的能力说明见 [docs/system-overview.md](docs/system-overview.md)。
+系统主线规划见 [roadmap.md](roadmap.md)，更完整的能力说明见 [docs/system-overview.md](docs/system-overview.md)，老板使用说明见 [docs/boss-manual.md](docs/boss-manual.md)。
 
 ## 当前非目标
 
