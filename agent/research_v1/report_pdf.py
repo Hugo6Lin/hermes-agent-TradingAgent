@@ -50,7 +50,27 @@ def _watchlist_rows(entries: list[dict] | None) -> str:
     return rows
 
 
-def _render_report_html(reports: list[dict], signals: list[dict], watchlist_entries: list[dict] | None = None) -> str:
+def _validation_rows(entries: list[dict] | None) -> str:
+    """Render validation results as HTML table rows."""
+    from html import escape
+    if not entries:
+        return '<tr><td colspan="6">No validation results</td></tr>'
+    rows = ""
+    for e in entries:
+        rows += f"""
+        <tr>
+          <td>{escape(e.get('ticker', ''))}</td>
+          <td>{escape(e.get('regime', ''))}</td>
+          <td>{escape(e.get('historical_support', ''))}</td>
+          <td>{escape(e.get('environment_fit', ''))}</td>
+          <td>{escape(e.get('main_failure_mode', ''))}</td>
+          <td>{e.get('validation_confidence', 0.0):.0%}</td>
+        </tr>
+        """
+    return rows
+
+
+def _render_report_html(reports: list[dict], signals: list[dict], watchlist_entries: list[dict] | None = None, validation_results: list[dict] | None = None) -> str:
     """Render a batch research report as HTML from canonical data."""
     from html import escape
 
@@ -191,6 +211,23 @@ def _render_report_html(reports: list[dict], signals: list[dict], watchlist_entr
       {(_watchlist_rows(watchlist_entries) if watchlist_entries else '<tr><td colspan="5">No watchlist entries</td></tr>')}
     </tbody>
   </table>
+
+  <h2>Validation</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Ticker</th>
+        <th>Regime</th>
+        <th>Historical Support</th>
+        <th>Environment Fit</th>
+        <th>Main Failure Mode</th>
+        <th>Confidence</th>
+      </tr>
+    </thead>
+    <tbody>
+      {(_validation_rows(validation_results) if validation_results else '<tr><td colspan="6">No validation results</td></tr>')}
+    </tbody>
+  </table>
 </body>
 </html>
 """
@@ -233,6 +270,12 @@ def export_task_pdf(
     except Exception:
         watchlist_entries = []
 
+    # Phase 17: fetch validation results
+    try:
+        validation_results = database.list_validation_results()
+    except Exception:
+        validation_results = []
+
     if not reports and not signals:
         raise KeyError(f"No canonical reports or signals found for task {task_id!r}")
 
@@ -240,7 +283,7 @@ def export_task_pdf(
     output_path.mkdir(parents=True, exist_ok=True)
     pdf_path = output_path / f"task_{task_id}.pdf"
 
-    html = _render_report_html(reports, signals, watchlist_entries)
+    html = _render_report_html(reports, signals, watchlist_entries, validation_results)
     edge_executable = _find_edge_executable()
 
     with tempfile.TemporaryDirectory(dir=str(output_path)) as temp_dir:

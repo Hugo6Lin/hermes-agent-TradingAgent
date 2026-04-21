@@ -206,6 +206,7 @@ Alerts are **advisory only**:
 | ThesisEngine | `thesis_engine.py` | Underlying thesis evaluation (Phase 14) |
 | InstrumentSelectionEngine | `instrument_selection.py` | Bullish instrument selection (Phase 14) |
 | WatchlistAlertCenter | `watchlist_alerts.py` | Watchlist entry registration, cadence, and alert generation (Phase 16) |
+| ValidationEngine | `validation_engine.py` | Historical support, environment fit, failure mode, and confidence annotation (Phase 17) |
 
 ## Data Layer
 
@@ -246,13 +247,55 @@ export_task_pdf(db, task_id)
   → generates PDF via Microsoft Edge headless
 ```
 
-## Phase 11/12/13/14/16 Changes
+## Phase 11/12/13/14/16/17 Changes
 
 - **Phase 11**: Canonical pipeline established (TaskRouter → Orchestrator → FinalJudge → CanonicalSignal/Report)
 - **Phase 12**: Futu-first market data (`MarketDataService`, `MarketDataProvider` ABC, `FallbackMarketDataProvider`)
 - **Phase 13**: Product acceptance (viewer, PDF, batch CLI, data stability)
 - **Phase 14**: Bullish decision system (`ThesisEngine`, `InstrumentSelectionEngine`, `PositionDecisionCard`) — additive layer, bullish-only instrument selection, stock thesis first
 - **Phase 16**: Watchlist & Alert Center (`WatchlistEntry`, `WatchlistAlert`, `WatchlistAlertCenter`) — boss-centric monitored watchlists with business-day cadence, thesis-state-aware alert levels, alert-only (no auto-execution)
+- **Phase 17**: Validation Engine (`ValidationResult`, `ValidationEngine`) — lightweight annotation layer providing historical support, environment fit, failure mode, and confidence without overriding thesis or instrument decisions
+
+## Validation Engine (Phase 17)
+
+Phase 17 adds a **lightweight validation annotation layer** — purely advisory, never overrides decisions.
+
+### ValidationResult Contract
+
+| Field | Type | Description |
+|---|---|---|
+| `ticker` | `str` | Ticker symbol |
+| `regime` | `str` | trend_up / range_bound / high_volatility / risk_off / unknown |
+| `historical_support` | `str` | strong / moderate / weak |
+| `environment_fit` | `str` | good / mixed / poor |
+| `main_failure_mode` | `str` | direction / timing / iv / liquidity / none |
+| `validation_confidence` | `float` | 0.0–1.0 |
+| `notes` | `str \| None` | Human-readable summary |
+
+### Regime Detection
+
+Rule-based detection from candle data and market context:
+- **trend_up**: price > 3% above SMA, low realized vol
+- **range_bound**: price near SMA, moderate vol
+- **high_volatility**: elevated realized vol OR IV percentile ≥ 0.88
+- **risk_off**: high vol + price below SMA
+- **unknown**: insufficient candle data
+
+### Historical Support
+
+Rule-based (no backtesting): strong when Investable thesis + good regime + clear catalyst + supportive valuation; weak when No Trade, high_vol/risk_off regime, or very high IV.
+
+### Failure Mode Inference
+
+- `Buy Stock` → direction | `Buy Call` (high IV) → iv | `Buy Call` (low IV) → timing
+- `Bull Call Spread` → timing | `Sell CSP` → direction | `Covered Call` → timing
+- Liquidity problems → liquidity (always, when present)
+
+### Key Constraints (Phase 17)
+
+- **Not a new authority**: validation is annotation only, does not override `decision_card` or `instrument_recommendation`
+- **Additive**: no changes to canonical signal, report, or Phase 14–16 outputs
+- **Bullish-only**: no bearish instruments introduced
 
 ## Legacy vs. Canonical
 

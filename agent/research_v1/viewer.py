@@ -104,6 +104,11 @@ def build_viewer_snapshot(database: ResearchDatabase) -> dict:
         snapshot["watchlist_entries"] = database.list_watchlist_entries()
     except Exception:
         snapshot["watchlist_entries"] = []
+    # Phase 17: validation results
+    try:
+        snapshot["validation_results"] = database.list_validation_results()
+    except Exception:
+        snapshot["validation_results"] = []
     return snapshot
 
 

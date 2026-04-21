@@ -158,3 +158,80 @@ pytest tests/agent/research_v1/test_watchlist_alerts.py tests/agent/research_v1/
 Expected: **56 passed** (34 bullish + 22 watchlist) + pre-existing Phase 13 failures (Windows temp file locks — unrelated to Phase 16).
 
 Phase 16 wiring is verified by the bullish integration tests (`test_bullish_decision_integration.py`) and by `test_database.py` (watchlist persistence) and `test_report_pdf.py` (PDF watchlist table).
+
+## Phase 17 Acceptance — Validation Engine
+
+**Goal**: Lightweight validation annotation layer without overriding thesis or instrument decisions.
+
+### L: Validation Contract Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_valid_construction` | ValidationResult accepts all valid field values | `test_validation_engine.py` |
+| `test_rejects_invalid_regime` | Invalid regime raises ValueError | `test_validation_engine.py` |
+| `test_rejects_invalid_historical_support` | Invalid historical_support raises ValueError | `test_validation_engine.py` |
+| `test_rejects_invalid_environment_fit` | Invalid environment_fit raises ValueError | `test_validation_engine.py` |
+| `test_rejects_invalid_failure_mode` | Invalid main_failure_mode raises ValueError | `test_validation_engine.py` |
+| `test_rejects_confidence_below_0` | Confidence < 0 raises ValueError | `test_validation_engine.py` |
+| `test_rejects_confidence_above_1` | Confidence > 1 raises ValueError | `test_validation_engine.py` |
+
+### M: Regime Detection Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_trend_up_when_price_above_sma_and_low_vol` | Price > SMA + low vol → trend_up | `test_validation_engine.py` |
+| `test_range_bound_when_price_near_sma` | Price oscillating → range_bound | `test_validation_engine.py` |
+| `test_high_volatility_when_realized_vol_high` | High daily ranges → high_volatility | `test_validation_engine.py` |
+| `test_risk_off_when_price_down_and_high_vol` | Price down + high vol → risk_off | `test_validation_engine.py` |
+| `test_unknown_when_insufficient_candles` | < 5 candles → unknown | `test_validation_engine.py` |
+| `test_high_iv_very_high_leads_to_high_volatility_regime` | IV ≥ 0.88 → high_volatility | `test_validation_engine.py` |
+
+### N: Historical Support Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_investable_plus_good_regime_plus_catalyst_yields_strong` | Investable + trend_up + catalyst → strong | `test_validation_engine.py` |
+| `test_watchlist_classification_yields_moderate` | Watchlist classification → moderate | `test_validation_engine.py` |
+| `test_no_trade_yields_weak` | No Trade classification → weak | `test_validation_engine.py` |
+| `test_high_volatility_regime_yields_weak_even_for_investable` | high_volatility regime → weak regardless | `test_validation_engine.py` |
+| `test_risk_off_regime_yields_weak` | risk_off regime → weak | `test_validation_engine.py` |
+| `test_low_quality_yields_weak` | quality < 0.45 → weak | `test_validation_engine.py` |
+
+### O: Failure Mode Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_buy_stock_yields_direction` | Buy Stock → direction | `test_validation_engine.py` |
+| `test_buy_call_with_high_iv_yields_iv` | Buy Call + high IV → iv | `test_validation_engine.py` |
+| `test_buy_call_with_low_iv_yields_timing` | Buy Call + low IV → timing | `test_validation_engine.py` |
+| `test_bull_call_spread_yields_timing` | Bull Call Spread → timing | `test_validation_engine.py` |
+| `test_sell_csp_yields_direction` | Sell CSP → direction | `test_validation_engine.py` |
+| `test_covered_call_yields_timing` | Covered Call → timing | `test_validation_engine.py` |
+| `test_liquidity_problem_yields_liquidity_first` | illiquid → liquidity (always) | `test_validation_engine.py` |
+
+### P: Validation Confidence Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_confidence_in_valid_range` | Confidence stays within [0.3, 0.95] | `test_validation_engine.py` |
+| `test_strong_thesis_investable_in_trend_up_gives_high_confidence` | Strong setup → confidence > 0.70 | `test_validation_engine.py` |
+| `test_risk_off_high_iv_gives_lower_confidence` | risk_off + high IV → lower confidence | `test_validation_engine.py` |
+| `test_illiquid_reduces_confidence` | illiquid < liquid confidence | `test_validation_engine.py` |
+
+### Q: App Integration Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_app_result_includes_validation_field` | TickerResearchResult has `validation` field | `test_validation_engine.py` |
+| `test_validation_engine_is_instantiated_in_app` | HermesResearchApp creates ValidationEngine | `test_validation_engine.py` |
+| `test_viewer_snapshot_includes_validation_results` | build_viewer_snapshot returns validation_results key | `test_validation_engine.py` |
+
+## Running the Phase 17 Acceptance Suite
+
+```bash
+pytest tests/agent/research_v1/test_validation_engine.py tests/agent/research_v1/test_bullish_decision_integration.py tests/agent/research_v1/test_watchlist_alerts.py tests/agent/research_v1/test_database.py tests/agent/research_v1/test_report_pdf.py -v
+```
+
+Expected: **112 passed** (36 validation + 36 bullish + 22 watchlist + 18 database/pdf) + pre-existing Windows temp file lock failures (unrelated to Phase 17).
+
+Phase 17 wiring is verified by `test_validation_engine.py` (app integration + viewer surface) and by the bullish integration tests confirming no regression in Phase 14–16 behavior.

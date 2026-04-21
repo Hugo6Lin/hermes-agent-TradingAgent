@@ -56,6 +56,7 @@ from agent.research_v1.instrument_selection import InstrumentSelectionEngine
 from agent.research_v1.options_decision import OptionsDecisionEngine
 from agent.research_v1.early_exit import EarlyExitEngine
 from agent.research_v1.watchlist_alerts import WatchlistAlertCenter
+from agent.research_v1.validation_engine import ValidationEngine
 from agent.research_v1.contracts import (
     UnderlyingThesis,
     InstrumentRecommendation,
@@ -63,6 +64,7 @@ from agent.research_v1.contracts import (
     OptionsStructure,
     EarlyExitPlan,
     WatchlistEntry,
+    ValidationResult,
     VALID_BULLISH_ACTIONS,
 )
 
@@ -94,6 +96,8 @@ class TickerResearchResult:
     early_exit: EarlyExitPlan | None = None
     # Phase 16: watchlist entry
     watchlist_entry: WatchlistEntry | None = None
+    # Phase 17: validation annotation
+    validation: ValidationResult | None = None
 
 
 @dataclass
@@ -157,6 +161,8 @@ class HermesResearchApp:
         # Phase 16: watchlist and alert center
         self._watchlist_center = WatchlistAlertCenter()
         self._watchlist_initialized = False
+        # Phase 17: validation engine
+        self._validation_engine = ValidationEngine()
 
     def run(self, request: str) -> ResearchResult:
         """
@@ -591,6 +597,24 @@ class HermesResearchApp:
             except Exception as exc:
                 errors.append(f"Phase16 watchlist error: {exc}")
 
+        # Phase 17: Validation — annotate the result without overriding decisions
+        validation: ValidationResult | None = None
+        if instrument_rec is not None:
+            try:
+                validation = self._validation_engine.evaluate(
+                    ticker=ticker,
+                    thesis=thesis,
+                    instrument_action=instrument_rec.primary_action,
+                    ticker_context=ticker_context,
+                    valuation=thesis_inputs.get("valuation", {}),
+                    catalysts=thesis_inputs.get("catalysts", {}),
+                )
+                # Persist so viewer snapshot can surface validation data
+                if self._pipeline and self._pipeline.database and validation is not None:
+                    self._pipeline.database.save_validation_result(validation)
+            except Exception as exc:
+                errors.append(f"Phase17 validation error: {exc}")
+
         # 8. Persist to database — first ensure the task row exists (FK prerequisite)
         if self._pipeline:
             try:
@@ -660,6 +684,7 @@ class HermesResearchApp:
             options_structure=options_structure,
             early_exit=early_exit,
             watchlist_entry=watchlist_entry,
+            validation=validation,
         )]
 
     def execute_subagent(self, subtask) -> list[EvidenceItem]:

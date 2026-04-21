@@ -669,6 +669,43 @@ def new_research_task(
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase 17: Validation Engine
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ValidationResult:
+    """
+    Phase 17: Lightweight validation annotation for the bullish decision system.
+
+    Provides historical support, environment fit, failure mode, and confidence
+    assessment WITHOUT overriding the thesis or instrument recommendation.
+
+    This is an annotation layer — it does not change decision authority.
+    """
+    ticker: str
+    regime: str           # "trend_up" | "range_bound" | "high_volatility" | "risk_off" | "unknown"
+    historical_support: str  # "strong" | "moderate" | "weak"
+    environment_fit: str     # "good" | "mixed" | "poor"
+    main_failure_mode: str   # "direction" | "timing" | "iv" | "liquidity" | "none"
+    validation_confidence: float  # 0.0 – 1.0
+    notes: str | None = None
+
+    def __post_init__(self):
+        if self.regime not in {
+            "trend_up", "range_bound", "high_volatility", "risk_off", "unknown"
+        }:
+            raise ValueError(f"regime must be trend_up/range_bound/high_volatility/risk_off/unknown; got {self.regime!r}")
+        if self.historical_support not in {"strong", "moderate", "weak"}:
+            raise ValueError(f"historical_support must be strong/moderate/weak; got {self.historical_support!r}")
+        if self.environment_fit not in {"good", "mixed", "poor"}:
+            raise ValueError(f"environment_fit must be good/mixed/poor; got {self.environment_fit!r}")
+        if self.main_failure_mode not in {"direction", "timing", "iv", "liquidity", "none"}:
+            raise ValueError(f"main_failure_mode must be direction/timing/iv/liquidity/none; got {self.main_failure_mode!r}")
+        if not (0.0 <= self.validation_confidence <= 1.0):
+            raise ValueError(f"validation_confidence must be 0.0-1.0; got {self.validation_confidence!r}")
+
+
 def new_subagent_task(
     task_id: str,
     agent_role: AgentRole,

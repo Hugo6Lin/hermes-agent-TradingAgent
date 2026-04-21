@@ -1166,6 +1166,59 @@ class ResearchDatabase:
             results.append(d)
         return results
 
+    # -------------------------------------------------------------------------
+    # Phase 17: Validation results
+    # -------------------------------------------------------------------------
+
+    def save_validation_result(self, result: Any) -> None:
+        """
+        Persist a ValidationResult to the validation_results table.
+
+        Uses INSERT OR REPLACE so re-running research on the same ticker
+        updates the validation entry.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS validation_results (
+                ticker TEXT PRIMARY KEY,
+                regime TEXT NOT NULL,
+                historical_support TEXT NOT NULL,
+                environment_fit TEXT NOT NULL,
+                main_failure_mode TEXT NOT NULL,
+                validation_confidence REAL NOT NULL,
+                notes TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            INSERT OR REPLACE INTO validation_results
+            (ticker, regime, historical_support, environment_fit, main_failure_mode, validation_confidence, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            result.ticker,
+            result.regime,
+            result.historical_support,
+            result.environment_fit,
+            result.main_failure_mode,
+            result.validation_confidence,
+            result.notes,
+        ))
+        conn.commit()
+        conn.close()
+
+    def list_validation_results(self, limit: int = 20) -> list[dict]:
+        """List validation results ordered by newest first."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM validation_results ORDER BY updated_at DESC LIMIT ?",
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
     def list_canonical_reports(self, limit: int = 20) -> list[dict]:
         """List canonical reports ordered by newest first."""
         conn = self._get_connection()
