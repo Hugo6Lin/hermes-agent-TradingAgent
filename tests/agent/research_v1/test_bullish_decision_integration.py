@@ -886,3 +886,167 @@ class TestPhase15OptionsStructureAndEarlyExit:
             assert zone.action not in auto_actions, (
                 f"Alert-only violation: zone {zone.zone_name} has auto-execute action {zone.action!r}"
             )
+
+
+class TestPhase16WatchlistPersistence:
+    """
+    Phase 16 closed-loop integration: watchlist entries must be persisted to
+    the database so that viewer/PDF surfaces can query them after a real run.
+
+    These tests verify:
+    1. DB-backed _run_ticker_pipeline() produces a row in list_watchlist_entries()
+    2. No-Trade classification maps to Broken thesis_state + Critical alert_level
+    """
+
+    def _build_investable_bundle(self, store, ticker):
+        """Build evidence bundle that produces Investable thesis (quality≥0.65, upside≥0.15, catalyst≥0.5)."""
+        raw_fund = {"summary_json": {"verdict": "buy", "confidence": 0.85, "direction": "bullish"}}
+        raw_val = {"summary_json": {"verdict": "buy", "confidence": 0.80, "upside_pct": 0.22, "direction": "bullish"}}
+        raw_cat = {"summary_json": {"sentiment": "positive", "confidence": 0.75, "direction": "bullish"}}
+        fund_items = store.normalize("t1", "st1", ticker, AgentRole.FUNDAMENTALS, raw_fund)
+        val_items = store.normalize("t2", "st2", ticker, AgentRole.VALUATION, raw_val)
+        cat_items = store.normalize("t3", "st3", ticker, AgentRole.NEWS, raw_cat)
+        return fund_items + val_items + cat_items
+
+    def test_watchlist_entry_persists_to_database(self):
+        """
+        A DB-backed _run_ticker_pipeline() run must produce a watchlist entry
+        row that is visible via list_watchlist_entries().
+
+        This closes the loop: app creates entry → saves to DB → viewer/PDF can read it.
+        """
+        import tempfile
+        from agent.research_v1.evidence_store import EvidenceStore
+        from agent.research_v1.data.database import ResearchDatabase
+        from agent.research_v1.contracts import ResearchTask, TaskType
+
+        store = EvidenceStore()
+        all_items = self._build_investable_bundle(store, "AAPL")
+
+        # Use a real temp-file database so persistence can be verified
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = f"{tmpdir}/test_watchlist.db"
+            database = ResearchDatabase(db_path=db_path)
+            database.initialize()
+            database.initialize_watchlist()
+
+            app = HermesResearchApp(llm_client=_Phase14MockClient(), database=database)
+
+            task = ResearchTask(
+                request_text="Research AAPL",
+                tickers=["AAPL"],
+                task_type=TaskType.SINGLE_TICKER_RESEARCH,
+                task_id="p16_db_test",
+                created_at=datetime.now(),
+            )
+            ticker_ctx = {
+                "market_data": {"iv_percentile": 0.55, "liquidity_ok": True},
+            }
+
+            results = app._run_ticker_pipeline(task, "AAPL", all_items, ticker_ctx)
+            tr = results[0]
+
+            # The run must have produced a watchlist_entry
+            assert tr.watchlist_entry is not None, "watchlist_entry must be populated"
+
+            # The DB must surface a row for this ticker
+            rows = database.list_watchlist_entries()
+            tickers = [r["ticker"] for r in rows]
+            assert "AAPL" in tickers, (
+                f"AAPL not found in DB watchlist after run. Got: {tickers}. "
+                "This means save_watchlist_entry() was not called or initialize_watchlist() was not run."
+            )
+
+            # The DB row must reflect the correct status (Held for a non-No-Trade action)
+            aapl_row = next(r for r in rows if r["ticker"] == "AAPL")
+            assert aapl_row["status"] == "Held", f"Expected Held, got {aapl_row['status']!r}"
+
+    def test_no_trade_yields_broken_critical_alert(self):
+        """
+        When thesis.classification is 'No Trade', the resulting watchlist entry
+        must have thesis_state='Broken' and alert_level='Critical'.
+
+        Per Phase 16 spec: No Trade → Broken → Critical.
+        This is the alert semantics that boss needs for risk management.
+        """
+        import tempfile
+        from agent.research_v1.evidence_store import EvidenceStore
+        from agent.research_v1.data.database import ResearchDatabase
+        from agent.research_v1.contracts import ResearchTask, TaskType, UnderlyingThesis
+
+        store = EvidenceStore()
+        # Low-quality evidence so thesis classifies as No Trade (quality < 0.35)
+        raw_fund = {"summary_json": {"verdict": "sell", "confidence": 0.30, "direction": "bearish"}}
+        raw_val = {"summary_json": {"verdict": "sell", "confidence": 0.28, "upside_pct": 0.02, "direction": "bearish"}}
+        raw_cat = {"summary_json": {"sentiment": "negative", "confidence": 0.25, "direction": "bearish"}}
+        fund_items = store.normalize("t1", "st1", "RDBD", AgentRole.FUNDAMENTALS, raw_fund)
+        val_items = store.normalize("t2", "st2", "RDBD", AgentRole.VALUATION, raw_val)
+        cat_items = store.normalize("t3", "st3", "RDBD", AgentRole.NEWS, raw_cat)
+        all_items = fund_items + val_items + cat_items
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = f"{tmpdir}/test_no_trade.db"
+            database = ResearchDatabase(db_path=db_path)
+            database.initialize()
+            database.initialize_watchlist()
+
+            app = HermesResearchApp(llm_client=_Phase14MockClient(), database=database)
+
+            # Patch the instrument selector so the Phase 16 block receives No Trade
+            orig_choose = app._instrument_selector.choose
+
+            def patched_choose_no_trade(thesis, option_context, holding_context):
+                # Return No Trade regardless of thesis classification
+                from agent.research_v1.contracts import InstrumentRecommendation
+                return InstrumentRecommendation(
+                    task_id="p16_no_trade",
+                    ticker="RDBD",
+                    primary_action="No Trade",
+                    ranked_alternatives=[],
+                    reason="Test: forced No Trade",
+                )
+
+            try:
+                app._instrument_selector.choose = patched_choose_no_trade
+
+                task = ResearchTask(
+                    request_text="Research RDBD",
+                    tickers=["RDBD"],
+                    task_type=TaskType.SINGLE_TICKER_RESEARCH,
+                    task_id="p16_no_trade_test",
+                    created_at=datetime.now(),
+                )
+                ticker_ctx = {"market_data": {"iv_percentile": 0.50, "liquidity_ok": True}}
+
+                results = app._run_ticker_pipeline(task, "RDBD", all_items, ticker_ctx)
+            finally:
+                app._instrument_selector.choose = orig_choose
+
+            tr = results[0]
+            assert tr.watchlist_entry is not None, "watchlist_entry must be populated for No Trade"
+
+            # No Trade must map to Passive Watch status
+            assert tr.watchlist_entry.status == "Passive Watch", (
+                f"Expected Passive Watch for No Trade, got {tr.watchlist_entry.status!r}"
+            )
+
+            # No Trade must map to Broken thesis_state
+            assert tr.watchlist_entry.thesis_state == "Broken", (
+                f"Expected thesis_state='Broken' for No Trade, got {tr.watchlist_entry.thesis_state!r}"
+            )
+
+            # Broken must map to Critical alert_level
+            assert tr.watchlist_entry.alert_level == "Critical", (
+                f"Expected alert_level='Critical' for Broken state, got {tr.watchlist_entry.alert_level!r}"
+            )
+
+            # The DB row must also reflect the correct state
+            rows = database.list_watchlist_entries()
+            rdbd_row = next((r for r in rows if r["ticker"] == "RDBD"), None)
+            assert rdbd_row is not None, "RDBD not found in DB after run"
+            assert rdbd_row["thesis_state"] == "Broken", (
+                f"DB row thesis_state must be Broken, got {rdbd_row['thesis_state']!r}"
+            )
+            assert rdbd_row["alert_level"] == "Critical", (
+                f"DB row alert_level must be Critical, got {rdbd_row['alert_level']!r}"
+            )

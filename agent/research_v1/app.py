@@ -156,6 +156,7 @@ class HermesResearchApp:
         self._early_exit_engine = EarlyExitEngine()
         # Phase 16: watchlist and alert center
         self._watchlist_center = WatchlistAlertCenter()
+        self._watchlist_initialized = False
 
     def run(self, request: str) -> ResearchResult:
         """
@@ -561,10 +562,11 @@ class HermesResearchApp:
                     watchlist_status = "Held"
 
                 # Map thesis classification to thesis_state
+                # Per Phase 16 spec: Investable→Strengthening, Watchlist→Stable, No Trade→Broken
                 thesis_state_map = {
-                    "Investable": "Stable",
+                    "Investable": "Strengthening",
                     "Watchlist": "Stable",
-                    "No Trade": "Weakening",
+                    "No Trade": "Broken",
                 }
                 thesis_state = thesis_state_map.get(
                     thesis.classification if thesis else "", "Stable"
@@ -579,6 +581,12 @@ class HermesResearchApp:
                     entry = self._watchlist_center.update_thesis_state(
                         entry, thesis_state, f"Initial research: {thesis.classification if thesis else 'unknown'}"
                     )
+                # Persist so viewer/PDF surfaces can see this entry
+                if self._pipeline and self._pipeline.database:
+                    if not self._watchlist_initialized:
+                        self._pipeline.database.initialize_watchlist()
+                        self._watchlist_initialized = True
+                    self._pipeline.database.save_watchlist_entry(entry)
                 watchlist_entry = entry
             except Exception as exc:
                 errors.append(f"Phase16 watchlist error: {exc}")
