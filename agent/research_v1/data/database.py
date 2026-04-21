@@ -4,7 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 @dataclass
 class ResearchDatabase:
@@ -307,6 +307,21 @@ class ResearchDatabase:
                 is_read BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (list_id) REFERENCES watchlists(list_id)
+            )
+        """)
+
+        # Phase 16: structured watchlist_entries table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS watchlist_entries (
+                ticker TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                thesis_state TEXT NOT NULL,
+                alert_level TEXT NOT NULL,
+                current_action_bias TEXT NOT NULL,
+                last_user_interest_at TEXT,
+                last_research_at TEXT,
+                next_review_date TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -779,6 +794,48 @@ class ResearchDatabase:
         cursor.execute(
             "SELECT * FROM watchlist_items WHERE list_id = ? ORDER BY created_at",
             (list_id,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def save_watchlist_entry(self, entry: Any) -> None:
+        """
+        Save or update a structured WatchlistEntry (Phase 16).
+
+        Uses INSERT OR REPLACE so updates work as upserts.
+        """
+        from agent.research_v1.contracts import WatchlistEntry
+
+        if not isinstance(entry, WatchlistEntry):
+            raise TypeError(f"entry must be a WatchlistEntry; got {type(entry).__name__}")
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO watchlist_entries
+            (ticker, status, thesis_state, alert_level, current_action_bias,
+             last_user_interest_at, last_research_at, next_review_date, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (
+            entry.ticker,
+            entry.status,
+            entry.thesis_state,
+            entry.alert_level,
+            entry.current_action_bias,
+            entry.last_user_interest_at,
+            entry.last_research_at,
+            entry.next_review_date,
+        ))
+        conn.commit()
+        conn.close()
+
+    def list_watchlist_entries(self) -> list[dict]:
+        """List all structured watchlist entries (Phase 16)."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM watchlist_entries ORDER BY updated_at DESC"
         )
         rows = cursor.fetchall()
         conn.close()

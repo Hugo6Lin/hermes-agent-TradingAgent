@@ -55,12 +55,14 @@ from agent.research_v1.thesis_engine import ThesisEngine
 from agent.research_v1.instrument_selection import InstrumentSelectionEngine
 from agent.research_v1.options_decision import OptionsDecisionEngine
 from agent.research_v1.early_exit import EarlyExitEngine
+from agent.research_v1.watchlist_alerts import WatchlistAlertCenter
 from agent.research_v1.contracts import (
     UnderlyingThesis,
     InstrumentRecommendation,
     PositionDecisionCard,
     OptionsStructure,
     EarlyExitPlan,
+    WatchlistEntry,
     VALID_BULLISH_ACTIONS,
 )
 
@@ -90,6 +92,8 @@ class TickerResearchResult:
     # Phase 15: options structure and early exit
     options_structure: OptionsStructure | None = None
     early_exit: EarlyExitPlan | None = None
+    # Phase 16: watchlist entry
+    watchlist_entry: WatchlistEntry | None = None
 
 
 @dataclass
@@ -150,6 +154,8 @@ class HermesResearchApp:
         # Phase 15: options structure and early exit engines
         self._options_decision_engine = OptionsDecisionEngine()
         self._early_exit_engine = EarlyExitEngine()
+        # Phase 16: watchlist and alert center
+        self._watchlist_center = WatchlistAlertCenter()
 
     def run(self, request: str) -> ResearchResult:
         """
@@ -541,6 +547,42 @@ class HermesResearchApp:
             except Exception as exc:
                 errors.append(f"Phase15 options/early-exit error: {exc}")
 
+        # Phase 16: Watchlist entry — register the ticker in the watchlist
+        watchlist_entry: WatchlistEntry | None = None
+        if instrument_rec is not None:
+            try:
+                # Map instrument action to watchlist status
+                action = instrument_rec.primary_action
+                if action == "No Trade":
+                    watchlist_status = "Passive Watch"
+                elif action == "Watchlist":
+                    watchlist_status = "Passive Watch"
+                else:
+                    watchlist_status = "Held"
+
+                # Map thesis classification to thesis_state
+                thesis_state_map = {
+                    "Investable": "Stable",
+                    "Watchlist": "Stable",
+                    "No Trade": "Weakening",
+                }
+                thesis_state = thesis_state_map.get(
+                    thesis.classification if thesis else "", "Stable"
+                )
+
+                entry = self._watchlist_center.register(
+                    ticker=ticker,
+                    status=watchlist_status,
+                    action_bias=action,
+                )
+                if thesis_state != "Stable":
+                    entry = self._watchlist_center.update_thesis_state(
+                        entry, thesis_state, f"Initial research: {thesis.classification if thesis else 'unknown'}"
+                    )
+                watchlist_entry = entry
+            except Exception as exc:
+                errors.append(f"Phase16 watchlist error: {exc}")
+
         # 8. Persist to database — first ensure the task row exists (FK prerequisite)
         if self._pipeline:
             try:
@@ -609,6 +651,7 @@ class HermesResearchApp:
             decision_card=decision_card,
             options_structure=options_structure,
             early_exit=early_exit,
+            watchlist_entry=watchlist_entry,
         )]
 
     def execute_subagent(self, subtask) -> list[EvidenceItem]:

@@ -99,6 +99,11 @@ def build_viewer_snapshot(database: ResearchDatabase) -> dict:
     except Exception:
         snapshot["canonical_signals"] = []
         snapshot["canonical_reports"] = []
+    # Phase 16: structured watchlist entries
+    try:
+        snapshot["watchlist_entries"] = database.list_watchlist_entries()
+    except Exception:
+        snapshot["watchlist_entries"] = []
     return snapshot
 
 
