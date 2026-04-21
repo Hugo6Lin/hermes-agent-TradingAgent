@@ -126,6 +126,54 @@ Phase 14: After FinalJudge (step 7) — additive, non-destructive
     → Boss-facing decision artifact
 ```
 
+## Watchlist & Alert Center (Phase 16)
+
+Phase 16 adds boss-centric monitored watchlists with business-day cadence checks and thesis-state-aware alert levels. All actions are **advisory only** — no auto-execution.
+
+### WatchlistEntry Contract
+
+Every ticker processed by the pipeline may produce a `WatchlistEntry`:
+
+| Field | Type | Description |
+|---|---|---|
+| `ticker` | `str` | Ticker symbol |
+| `status` | `WatchlistStatus` | Held / High Priority Watch / Research In Progress / Passive Watch |
+| `thesis_state` | `ThesisState` | Strengthening / Stable / Weakening / Broken |
+| `alert_level` | `AlertLevel` | Critical / High / Medium / Low / None |
+| `current_action_bias` | `str` | Instrument action (e.g. "Sell Cash-Secured Put") |
+
+Status is derived from `instrument_rec.primary_action`: "No Trade" or "Watchlist" → Passive Watch; everything else → Held.
+
+### WatchlistAlert Contract
+
+Alerts are **advisory only**:
+
+| Field | Type | Description |
+|---|---|---|
+| `ticker` | `str` | Ticker symbol |
+| `alert_level` | `AlertLevel` | Critical / High / Medium / Low |
+| `message` | `str` | Human-readable advisory message |
+
+### Cadence Rules
+
+| Status | Cadence |
+|---|---|
+| Held / High Priority Watch / Research In Progress | Every business day |
+| Passive Watch | Weekly |
+
+### Alert Level Mapping (thesis_state → alert_level)
+
+| Thesis State | Alert Level |
+|---|---|
+| `Broken` | Critical |
+| `Weakening` | High |
+| `Strengthening` | Medium |
+| `Stable` | None |
+
+### Data Storage
+
+`ResearchDatabase` persists watchlist entries in the `watchlist_entries` table. Viewer snapshots and PDF exports include the current watchlist.
+
 ### Allowed Instrument Actions
 
 | Action | When preferred |
@@ -157,6 +205,7 @@ Phase 14: After FinalJudge (step 7) — additive, non-destructive
 | Reviewer | `reviewer.py` | Optional quality review |
 | ThesisEngine | `thesis_engine.py` | Underlying thesis evaluation (Phase 14) |
 | InstrumentSelectionEngine | `instrument_selection.py` | Bullish instrument selection (Phase 14) |
+| WatchlistAlertCenter | `watchlist_alerts.py` | Watchlist entry registration, cadence, and alert generation (Phase 16) |
 
 ## Data Layer
 
@@ -197,12 +246,13 @@ export_task_pdf(db, task_id)
   → generates PDF via Microsoft Edge headless
 ```
 
-## Phase 11/12/13/14 Changes
+## Phase 11/12/13/14/16 Changes
 
 - **Phase 11**: Canonical pipeline established (TaskRouter → Orchestrator → FinalJudge → CanonicalSignal/Report)
 - **Phase 12**: Futu-first market data (`MarketDataService`, `MarketDataProvider` ABC, `FallbackMarketDataProvider`)
 - **Phase 13**: Product acceptance (viewer, PDF, batch CLI, data stability)
 - **Phase 14**: Bullish decision system (`ThesisEngine`, `InstrumentSelectionEngine`, `PositionDecisionCard`) — additive layer, bullish-only instrument selection, stock thesis first
+- **Phase 16**: Watchlist & Alert Center (`WatchlistEntry`, `WatchlistAlert`, `WatchlistAlertCenter`) — boss-centric monitored watchlists with business-day cadence, thesis-state-aware alert levels, alert-only (no auto-execution)
 
 ## Legacy vs. Canonical
 
@@ -214,5 +264,6 @@ export_task_pdf(db, task_id)
 | Market data | `yahoo_finance.py` direct | `MarketDataService` (Futu-first) |
 | Analyst execution | `researchers/` | `subagent_executor.py + analysts/` |
 | Instrument selection | N/A | Phase 14: bullish-only (`InstrumentSelectionEngine`) |
+| Watchlist & alerts | N/A | Phase 16: boss-centric monitored watchlists (`WatchlistAlertCenter`) |
 
 Legacy and canonical co-exist. Viewer and PDF prefer canonical; legacy is kept for backwards compatibility.

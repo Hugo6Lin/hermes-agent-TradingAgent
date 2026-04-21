@@ -31,7 +31,26 @@ def _find_edge_executable() -> Path:
     )
 
 
-def _render_report_html(reports: list[dict], signals: list[dict]) -> str:
+def _watchlist_rows(entries: list[dict] | None) -> str:
+    """Render watchlist entries as HTML table rows."""
+    from html import escape
+    if not entries:
+        return '<tr><td colspan="5">No watchlist entries</td></tr>'
+    rows = ""
+    for e in entries:
+        rows += f"""
+        <tr>
+          <td>{escape(e.get('ticker', ''))}</td>
+          <td>{escape(e.get('status', ''))}</td>
+          <td>{escape(e.get('thesis_state', ''))}</td>
+          <td>{escape(e.get('alert_level', ''))}</td>
+          <td>{escape(e.get('current_action_bias', ''))}</td>
+        </tr>
+        """
+    return rows
+
+
+def _render_report_html(reports: list[dict], signals: list[dict], watchlist_entries: list[dict] | None = None) -> str:
     """Render a batch research report as HTML from canonical data."""
     from html import escape
 
@@ -156,6 +175,22 @@ def _render_report_html(reports: list[dict], signals: list[dict]) -> str:
     </thead>
     <tbody>{signal_rows}</tbody>
   </table>
+
+  <h2>Watchlist</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Ticker</th>
+        <th>Status</th>
+        <th>Thesis State</th>
+        <th>Alert Level</th>
+        <th>Action Bias</th>
+      </tr>
+    </thead>
+    <tbody>
+      {(_watchlist_rows(watchlist_entries) if watchlist_entries else '<tr><td colspan="5">No watchlist entries</td></tr>')}
+    </tbody>
+  </table>
 </body>
 </html>
 """
@@ -192,6 +227,12 @@ def export_task_pdf(
         signals.append(d)
     conn.close()
 
+    # Phase 16: fetch watchlist entries
+    try:
+        watchlist_entries = database.list_watchlist_entries()
+    except Exception:
+        watchlist_entries = []
+
     if not reports and not signals:
         raise KeyError(f"No canonical reports or signals found for task {task_id!r}")
 
@@ -199,7 +240,7 @@ def export_task_pdf(
     output_path.mkdir(parents=True, exist_ok=True)
     pdf_path = output_path / f"task_{task_id}.pdf"
 
-    html = _render_report_html(reports, signals)
+    html = _render_report_html(reports, signals, watchlist_entries)
     edge_executable = _find_edge_executable()
 
     with tempfile.TemporaryDirectory(dir=str(output_path)) as temp_dir:

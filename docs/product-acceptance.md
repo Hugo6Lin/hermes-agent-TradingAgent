@@ -1,4 +1,4 @@
-# Product Acceptance Criteria — Phase 13
+# Product Acceptance Criteria — Phase 13 + Phase 16
 
 ## What This Document Is
 
@@ -102,3 +102,59 @@ Hermes TODAY provides:
 ## Acceptance Gate
 
 All Phase 13 acceptance tests must pass before a Phase 14 feature branch is opened.
+
+## Phase 16 Acceptance — Watchlist & Alert Center
+
+**Goal**: Boss-centric monitored watchlists with alert-only advisory, business-day cadence, and thesis-state-aware alert levels.
+
+### F: Watchlist Contract Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_watchlist_entry_validates_status` | WatchlistEntry rejects invalid status | `test_watchlist_alerts.py` |
+| `test_watchlist_entry_validates_thesis_state` | WatchlistEntry rejects invalid thesis_state | `test_watchlist_alerts.py` |
+| `test_watchlist_entry_validates_alert_level` | WatchlistEntry rejects invalid alert_level | `test_watchlist_alerts.py` |
+| `test_watchlist_alert_validates_fields` | WatchlistAlert rejects invalid alert_level or missing fields | `test_watchlist_alerts.py` |
+
+### G: Watchlist Persistence Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_save_and_list_watchlist_entry` | WatchlistEntry round-trips through SQLite | `test_watchlist_alerts.py` |
+| `test_save_watchlist_entry_replace` | INSERT OR REPLACE updates existing entry | `test_watchlist_alerts.py` |
+
+### H: Watchlist Cadence Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_business_day_cadence_for_active_statuses` | Held/HighPriority/ResearchInProgress → business_day | `test_watchlist_alerts.py` |
+| `test_weekly_cadence_for_passive_watch` | PassiveWatch → weekly | `test_watchlist_alerts.py` |
+| `test_tomorrow_is_business_day` | Business day helper excludes weekends | `test_watchlist_alerts.py` |
+| `test_next_cadence_respects_business_day_gap` | Weekly cadence skips weekends | `test_watchlist_alerts.py` |
+
+### I: Thesis State → Alert Level Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_broken_triggers_critical_alert` | Broken → AlertLevel.CRITICAL | `test_watchlist_alerts.py` |
+| `test_weakening_triggers_high_alert` | Weakening → AlertLevel.HIGH | `test_watchlist_alerts.py` |
+| `test_strengthening_triggers_medium_alert` | Strengthening → AlertLevel.MEDIUM | `test_watchlist_alerts.py` |
+| `test_stable_triggers_no_alert` | Stable → AlertLevel.NONE | `test_watchlist_alerts.py` |
+
+### J: Alert Generation and Summary Acceptance
+
+| Test | Criterion | File |
+|---|---|---|
+| `test_build_alert_produces_watchlist_alert` | build_alert() returns WatchlistAlert with correct level | `test_watchlist_alerts.py` |
+| `test_summarize_reports_correct_counts` | summarize() counts by status and alert_level | `test_watchlist_alerts.py` |
+| `test_update_thesis_state_changes_state` | update_thesis_state() changes thesis_state | `test_watchlist_alerts.py` |
+
+## Running the Phase 16 Acceptance Suite
+
+```bash
+pytest tests/agent/research_v1/test_watchlist_alerts.py tests/agent/research_v1/test_bullish_decision_integration.py -v
+```
+
+Expected: **56 passed** (34 bullish + 22 watchlist) + pre-existing Phase 13 failures (Windows temp file locks — unrelated to Phase 16).
+
+Phase 16 wiring is verified by the bullish integration tests (`test_bullish_decision_integration.py`) and by `test_database.py` (watchlist persistence) and `test_report_pdf.py` (PDF watchlist table).

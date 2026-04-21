@@ -38,6 +38,7 @@ It closes the loop across:
 | SQLite persistence | Shipped |
 | Directory documentation standards | Repo-enforced |
 | Repo-level doc-sync checker | Shipped |
+| Watchlist & Alert Center | Phase 16 complete |
 
 ## Core Flow
 
