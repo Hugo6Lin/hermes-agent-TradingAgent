@@ -3,11 +3,11 @@
 import pytest
 from unittest.mock import Mock
 
-from agent.research_v1.reviewer import ReviewerAgent
+from agent.research_v1.reviewer_legacy import ReviewerAgent
 from agent.research_v1.grading import GradingAgent
 from agent.research_v1.monitor import MonitorAgent
 from agent.research_v1.notifications import NotificationDispatcher
-from agent.research_v1.trade_plan import TradePlanGenerator
+from agent.research_v1.trade_plan_legacy import TradePlanGenerator
 
 
 class MockLLMClient(Mock):

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Thin pre-commit wrapper around check_docs.py
+# Installs via: ln -sf ../../.git_hooks/pre-commit-check-docs .git/hooks/pre-commit
+
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+cd "$REPO_ROOT"
+
+# Run the checker with git staged files (no args = reads from git --cached)
+python "$HOOK_DIR/check_docs.py"
+exit $?

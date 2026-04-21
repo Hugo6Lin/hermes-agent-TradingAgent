@@ -13,13 +13,13 @@ from agent.research_v1.researchers.bull_researcher import BullResearcher
 from agent.research_v1.researchers.bear_researcher import BearResearcher
 from agent.research_v1.researchers.research_manager import DebateManager
 from agent.research_v1.grading import GradingAgent
-from agent.research_v1.reviewer import ReviewerAgent
+from agent.research_v1.reviewer_legacy import ReviewerAgent
 from agent.research_v1.monitor import MonitorAgent
 from agent.research_v1.data.database import ResearchDatabase
 from agent.research_v1.llm_clients import LLMResponse
 from agent.research_v1.paper_trade import PaperTradeEngine
 from agent.research_v1.signal_pipeline import SignalPersistencePipeline
-from agent.research_v1.trade_plan import TradePlanGenerator
+from agent.research_v1.trade_plan_legacy import TradePlanGenerator
 
 
 def create_mock_llm_response(content: str) -> Mock:

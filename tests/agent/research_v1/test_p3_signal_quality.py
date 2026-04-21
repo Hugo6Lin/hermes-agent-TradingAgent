@@ -24,6 +24,17 @@ class _FakeProvider(MarketDataProvider):
     def fetch_history(self, symbol: str, start_date: str, end_date: str) -> list[dict]:
         return list(self.rows)
 
+    def fetch_snapshot(self, symbols: list[str]) -> list[dict]:
+        return []
+
+    def fetch_option_chain(
+        self,
+        symbol: str,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[dict]:
+        return []
+
 
 def test_data_quality_validator_skips_rows_with_missing_fields():
     """Drop rows with missing required fields and keep valid points."""

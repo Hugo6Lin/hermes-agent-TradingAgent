@@ -1,9 +1,15 @@
 """Tests for P6 minimal viewer and end-of-day summary."""
 
+import json
 import os
 import tempfile
+import threading
+import time
+from pathlib import Path
+from urllib.request import urlopen
 
 from agent.research_v1.data.database import ResearchDatabase
+from agent.research_v1.research_batch_service import save_batch_research
 from agent.research_v1.viewer import (
     build_end_of_day_summary,
     build_viewer_snapshot,
@@ -84,7 +90,9 @@ def test_render_dashboard_html_contains_core_sections():
         }
     )
 
-    assert "Current Signals" in html
+    assert "Legacy Signals" in html
+    assert "Canonical Signals" in html
+    assert "Canonical Reports" in html
     assert "Open Positions" in html
     assert "Paper Trades" in html
     assert "Alerts" in html
@@ -132,3 +140,110 @@ def test_build_viewer_snapshot_tolerates_missing_watchlist_tables():
 
         snapshot = build_viewer_snapshot(db)
         assert snapshot["alerts"] == []
+
+
+def test_viewer_routes_latest_batch_overview_and_ticker_detail_from_persisted_batch():
+    """Serve the latest research batch overview and ticker detail from persisted data."""
+    fixture_path = Path(__file__).parent / "fixtures" / "sample_batch_payload.json"
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "research.db")
+        db = ResearchDatabase(db_path)
+        db.initialize()
+
+        result = save_batch_research(db, payload)
+        server = serve_viewer(db, host="127.0.0.1", port=0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            time.sleep(0.05)
+            port = server.server_address[1]
+            overview = urlopen(f"http://127.0.0.1:{port}/").read().decode("utf-8")
+            latest = urlopen(f"http://127.0.0.1:{port}/batches/latest").read().decode("utf-8")
+            detail = urlopen(f"http://127.0.0.1:{port}/ticker/{result['item_ids'][0]}").read().decode("utf-8")
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            server.server_close()
+
+        assert "Executive Summary" in overview
+        assert "NVDA" in overview
+        assert "Top Risk" in overview
+        assert "Executive Summary" in latest
+        assert "Bottom Line" in detail
+        assert "Risk Watch" in detail
+
+
+def test_ticker_detail_page_uses_owning_batch_even_after_newer_batch_is_saved():
+    """Older batch ticker pages should remain addressable after later batches are persisted."""
+    fixture_path = Path(__file__).parent / "fixtures" / "sample_batch_payload.json"
+    first_payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    second_payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    second_payload["title"] = "US AI Leaders - Follow Up"
+    second_payload["boss_summary"] = "Follow-up batch for later coverage."
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = ResearchDatabase(os.path.join(tmpdir, "research.db"))
+        db.initialize()
+
+        first_result = save_batch_research(db, first_payload)
+        second_result = save_batch_research(db, second_payload)
+        server = serve_viewer(db, host="127.0.0.1", port=0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            time.sleep(0.05)
+            port = server.server_address[1]
+            detail = urlopen(f"http://127.0.0.1:{port}/ticker/{first_result['item_ids'][0]}").read().decode("utf-8")
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            server.server_close()
+
+        assert "NVDA" in detail
+        assert "NVDA is the strongest setup in the batch." in detail
+        assert "Follow-up batch for later coverage." not in detail
+        assert second_result["batch_id"] > first_result["batch_id"]
+
+
+def test_overview_uses_one_canonical_report_per_batch_item():
+    """Overview cards should not duplicate when an item has multiple reports."""
+    fixture_path = Path(__file__).parent / "fixtures" / "sample_batch_payload.json"
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = ResearchDatabase(os.path.join(tmpdir, "research.db"))
+        db.initialize()
+
+        result = save_batch_research(db, payload)
+        item_id = result["item_ids"][0]
+        conn = db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO company_reports (
+                batch_item_id, bottom_line, why_it_matters, action_plan,
+                bull_case, risk_watch, research_summary, signal_snapshot_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                item_id,
+                "NVDA canonical report should win.",
+                "This second report should become the canonical overview text.",
+                "Watch the later note.",
+                "Later report bull case.",
+                "Later report risk watch.",
+                "Later report summary.",
+                "{\"grade\": \"S\"}",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        snapshot = build_viewer_snapshot(db)
+        overview = render_dashboard_html(snapshot)
+
+        assert overview.count(f'/ticker/{item_id}') == 1
+        assert "NVDA canonical report should win." in overview
+        assert "NVDA is the strongest setup in the batch." not in overview

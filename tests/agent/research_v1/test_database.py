@@ -481,3 +481,118 @@ def test_save_paper_trade_records_simulated_execution():
         assert paper_trade["symbol"] == "AAPL"
         assert paper_trade["quantity"] == 5
         assert paper_trade["status"] == "open"
+
+
+def test_database_persists_batch_and_reports():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = ResearchDatabase(os.path.join(tmpdir, "research.db"))
+        db.initialize()
+
+        batch_id = db.create_research_batch(
+            title="US Big Tech Batch",
+            requested_tickers=["AAPL", "MSFT"],
+            boss_summary="AAPL leads on current setup.",
+            status="completed",
+        )
+        item_id = db.add_research_batch_item(
+            batch_id,
+            "AAPL",
+            1,
+            "A",
+            0.82,
+            81.5,
+            "BUY",
+            "Earnings resilience",
+            "Valuation compression",
+            186.5,
+            173.45,
+            208.88,
+            "20d",
+        )
+        report_id = db.save_company_report(
+            item_id,
+            "AAPL is the top name in this batch.",
+            "Execution remains strong.",
+            "Accumulate near entry zone.",
+            "Services mix supports margin resilience.",
+            "Macro slowdown could compress multiples.",
+            "Balanced upside with manageable risk.",
+            '{"grade": "A"}',
+        )
+
+        batch = db.get_research_batch(batch_id)
+        items = db.list_research_batch_items(batch_id)
+        report = db.get_company_report(report_id)
+
+        assert batch["title"] == "US Big Tech Batch"
+        assert batch["requested_tickers"] == ["AAPL", "MSFT"]
+        assert items[0]["symbol"] == "AAPL"
+        assert report["bottom_line"] == "AAPL is the top name in this batch."
+
+
+def test_batch_and_report_foreign_keys_reject_invalid_parent_ids():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = ResearchDatabase(os.path.join(tmpdir, "research.db"))
+        db.initialize()
+
+        with pytest.raises(sqlite3.IntegrityError):
+            db.add_research_batch_item(
+                999,
+                "AAPL",
+                1,
+                "A",
+                0.82,
+                81.5,
+                "BUY",
+                "Earnings resilience",
+                "Valuation compression",
+                186.5,
+                173.45,
+                208.88,
+                "20d",
+            )
+
+        batch_id = db.create_research_batch(
+            title="US Big Tech Batch",
+            requested_tickers=["AAPL"],
+            boss_summary="AAPL leads on current setup.",
+        )
+        item_id = db.add_research_batch_item(
+            batch_id,
+            "AAPL",
+            1,
+            "A",
+            0.82,
+            81.5,
+            "BUY",
+            "Earnings resilience",
+            "Valuation compression",
+            186.5,
+            173.45,
+            208.88,
+            "20d",
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            db.save_company_report(
+                999,
+                "AAPL is the top name in this batch.",
+                "Execution remains strong.",
+                "Accumulate near entry zone.",
+                "Services mix supports margin resilience.",
+                "Macro slowdown could compress multiples.",
+                "Balanced upside with manageable risk.",
+                '{"grade": "A"}',
+            )
+
+        report_id = db.save_company_report(
+            item_id,
+            "AAPL is the top name in this batch.",
+            "Execution remains strong.",
+            "Accumulate near entry zone.",
+            "Services mix supports margin resilience.",
+            "Macro slowdown could compress multiples.",
+            "Balanced upside with manageable risk.",
+            '{"grade": "A"}',
+        )
+        assert report_id > 0

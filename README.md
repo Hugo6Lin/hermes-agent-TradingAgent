@@ -1,235 +1,227 @@
-# Hermes Agent
+# Hermes
 
-> 老板专属交易决策中枢  
-> 高胜率信号系统，背后是一套可持续运行的 AI 量化研究引擎。
+> A boss-first trading research system.
+> Research in, structured signal out.
 
-![Hermes Overview](docs/assets/hero-overview.svg)
+**Hermes** is a single-machine research desk for equity and options workflows.
+It takes a ticker request, runs a canonical research pipeline, produces a readable
+report, a structured signal, a trade plan, optional review output, and exposes the
+result through a viewer, PDF export, and SQLite persistence.
 
-## 这套系统解决什么问题
+## What Hermes Does
 
-Hermes 不是通用金融产品，也不是给多人协作的量化平台。
+Hermes answers one question well:
 
-它只做一件事：为老板持续输出更值得执行的交易信号，并把信号变成可以直接跟单的交易计划。
+**What should we pay attention to now, why, and how should we act on it?**
 
-它的目标不是“写一篇看起来很聪明的研究报告”，而是稳定回答这几个更直接的问题：
+It closes the loop across:
 
-- 现在最值得执行的股票信号是什么
-- 为什么是它，而不是另一个 `S` 级信号
-- 具体该怎么买，跌到哪里止损，涨到哪里止盈
-- 这套评级历史上到底有没有 edge
+- Research (multi-analyst, multi-role)
+- Structured signal generation
+- Trade plan generation
+- Optional review gate
+- Viewer display
+- PDF export
+- SQLite persistence
+- Futu-first market data with explicit fallback visibility
 
-## 老板最终会得到什么
+## System Capabilities
 
-### 1. 结构化交易信号
+| Capability | Status |
+|---|---|
+| Canonical research pipeline | Phase 13 complete |
+| Futu-first market data | Phase 12 complete |
+| Signal generation (S/A/B/C + priority) | Shipped |
+| Trade plan generation | Shipped |
+| PDF export | Shipped |
+| Web viewer (legacy + canonical + batch) | Shipped |
+| SQLite persistence | Shipped |
+| Directory documentation standards | Repo-enforced |
+| Repo-level doc-sync checker | Shipped |
 
-每次研究结果都不是模糊观点，而是结构化信号：
+## Core Flow
 
-- `rating`
-- `confidence`
-- `entry_price`
-- `stop_loss`
-- `take_profit`
-- `holding_horizon`
-- `signal_valid_until`
-- `priority_score`
+```mermaid
+flowchart LR
+    A["Research Request"] --> B["TaskRouter"]
+    B --> C["Orchestrator"]
+    C --> D["MarketDataService<br/>Futu-first"]
+    C --> E["SubagentExecutor"]
+    D --> E
+    E --> F["EvidenceStore"]
+    F --> G["FinalJudge"]
+    G --> H["CanonicalSignal"]
+    G --> I["CanonicalReport"]
+    H --> J["TradePlan"]
+    I --> K["PDF / Viewer / DB"]
+    H --> K
+    J --> K
+    G --> L["Reviewer (Optional)"]
+    L --> K
+```
 
-### 2. 回测证明，而不只是叙事
+## Market Data Path
 
-Hermes 已经具备 `5 / 20 / 60` 交易日回测闭环，可以按 `S / A / B / C` 分桶统计：
+Hermes defaults to a **Futu-first** market data path:
 
-- 胜率
-- 平均收益
-- 中位收益
-- 最大回撤
-- 盈亏比
+- **Primary**: Futu OpenD (U.S. / HK stocks + options)
+- **Fallback**: Yahoo Finance (historical prices)
+- Fallback reasons remain visible in result metadata
 
-这意味着系统不只是“会说”，而是能回答：
+```bash
+# Quick market data commands
+python -m agent.research_v1.app quote --symbols AAPL,HK.00700
+python -m agent.research_v1.app option-chain --symbol GLW --start 2027-01-01 --end 2027-01-31
+```
 
-- `S` 级信号历史上值不值得跟
-- `A` 级和 `S` 级差距有多大
-- 哪个持有周期更适合执行
+Runtime defaults: `FUTU_OPEND_HOST=127.0.0.1`, `FUTU_OPEND_PORT=11111`, `FUTU_DEFAULT_MARKET=US`
 
-### 3. 明确交易计划
+## Product Surfaces
 
-强信号会进一步生成交易计划，而不是只给一句“看多”：
+| Surface | Entry point | What it does |
+|---|---|---|
+| Research app | `agent/research_v1/app.py` | Canonical pipeline for single or multi-ticker research |
+| Batch CLI | `agent/research_v1/batch_cli.py` | App init, status, viewer launch, PDF export |
+| Viewer | `agent/research_v1/viewer.py` | Legacy / canonical / batch research pages in browser |
+| PDF export | `agent/research_v1/report_pdf.py` | Canonical task PDFs and batch research PDFs |
+| Database | `agent/research_v1/data/database.py` | SQLite persistence: tasks, signals, reports, batches |
 
-- 是否执行
-- 建议入场区间
-- 止损位
-- 止盈位
-- 建议仓位
-- 信号失效条件
+## Quick Start
 
-### 4. 后台盯盘与查看入口
-
-Hermes 已具备：
-
-- `macOS launchd` 服务化启动
-- 健康检查与降级模式
-- 收盘后低频轮询
-- 极简 Web Viewer
-
-老板只需要打开一个页面，就能看见：
-
-- 当前信号
-- 信号优先级
-- 持仓
-- 告警
-- 模拟仓状态
-
-## 系统能力总览
-
-### 信号引擎
-
-- `grading` 输出统一的结构化信号 schema
-- `signals / price_snapshots / signal_revisions` 完整落库
-- 信号可版本化、可追溯、可比较
-
-### 回测闭环
-
-- `signal_outcomes` 存储真实回测结果
-- Yahoo Finance 历史价格接入
-- gap handling
-- 按 `grade` 分桶 edge 汇总
-
-### 交易执行层
-
-- `TradePlanGenerator`
-- 持仓记录与状态跟踪
-- `paper trade` 模拟执行
-- 决策型告警而不是通用提醒
-
-### 数据质量与排序
-
-- Provider 抽象层
-- Yahoo Finance / AkShare 可切换接入
-- 字段校验、新鲜度检测、fallback
-- 证据冲突检测
-- 组合上下文下的信号优先级排序
-- Analyst 动态加权
-
-### 估值与风控
-
-- `DCF`
-- `DDM`
-- 相对估值
-- `Sharpe Ratio`
-- `Max Drawdown`
-- `VaR`
-- 极端行情压力测试
-
-### 服务与查看器
-
-- `launchd plist` 自启
-- 健康检查与恢复
-- 降级模式
-- 最小 Web 页面
-- 收盘后简版复盘摘要
-
-## 一次完整决策是怎么出来的
-
-1. 多分析师研究同一只股票  
-   基本面、新闻、技术面、宏观与研究结论被整合到统一决策输入。
-
-2. 评级层生成结构化信号  
-   不是只输出 `S/A/B/C`，而是一起给出 entry、stop、take-profit、horizon、priority。
-
-3. 信号进入回测闭环  
-   系统会把信号和后续真实价格结果关联，持续统计哪些等级真的有 edge。
-
-4. 信号被转换为交易计划  
-   包括执行与否、入场区间、仓位建议、止盈止损和失效条件。
-
-5. 后台服务持续运行  
-   市场开启时轮询，异常时降级，恢复后继续工作。
-
-6. 老板通过极简查看页获取结果  
-   看到当前最值得执行的信号、已有持仓、告警和模拟交易状态。
-
-## 为什么这不是普通 AI 选股脚本
-
-普通 AI 选股脚本通常停在“生成观点”。
-
-Hermes 已经完整打通了下面这条主线：
-
-- 研究
-- 结构化信号
-- 回测验证
-- 交易计划
-- 持仓与告警
-- 服务化运行
-- 最小查看器
-
-它不是一次性的问答脚本，而是一个老板单人使用场景下的交易决策系统骨架。
-
-## 快速开始
-
-### 环境要求
-
-- Python `3.11+`
-- 可用的 LLM API 配置
-- macOS 服务模式需要 `launchd`
-
-### 安装依赖
+### Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 运行研究与信号
+### Run research
 
 ```bash
-python -m agent.research_v1.cli "分析 AAPL"
+# Single ticker
+python -m agent.research_v1.app "Research AAPL"
+
+# Multi-ticker comparison
+python -m agent.research_v1.app "Compare AAPL and MSFT"
 ```
 
-### 启动最小查看器
+### Initialize and use the local research desk
 
 ```bash
-python -m agent.research_v1.viewer
+# Initialize app root
+python -m agent.research_v1.batch_cli --app-root .hermes init
+
+# Open viewer
+python -m agent.research_v1.batch_cli --app-root .hermes viewer --host 127.0.0.1 --port 8008
+
+# Export PDF
+python -m agent.research_v1.batch_cli --app-root .hermes export-pdf --batch-id 1
 ```
 
-### 安装 macOS 服务
+### Run acceptance checks
 
 ```bash
-./install.sh
+pytest tests/agent/research_v1/test_phase13_acceptance.py -v
 ```
 
-## 架构概览
+## Canonical Pipeline
 
-核心模块位于 `agent/research_v1`：
+```
+Research Request
+    ↓
+TaskRouter.route() → ResearchTask
+    ↓
+Orchestrator.decompose() → SubagentTask[] (each role × each ticker)
+    ↓
+MarketDataService.fetch_context_for_ticker() — Futu-first, fallback tracked
+    ↓
+SubagentExecutor.execute() → EvidenceItem[] per analyst role
+    ↓
+EvidenceStore.normalize() → EvidenceBundle
+    ↓
+FinalJudge.judge() → CanonicalSignal + CanonicalReport
+    ↓
+SignalPersistencePipeline.persist_canonical_signal() → SQLite
+    ↓
+TradePlanGenerator.generate() → trade_plan dict
+    ↓
+Reviewer.review() (optional) → CanonicalReview
+    ↓
+TickerResearchResult (signal / report / review / trade_plan / audit)
+```
 
-- `grading.py`：信号评级与结构化输出
-- `signal_pipeline.py`：研究结果落库
-- `backtest.py` / `backtest_pipeline.py`：回测闭环
-- `trade_plan.py` / `paper_trade.py`：交易计划与模拟执行
-- `signal_quality.py` / `analyst_weighting.py`：信号质量与优先级
-- `valuation_models.py` / `risk_metrics.py`：估值与风险引擎
-- `service_manager.py` / `macos_service.py`：服务模式
-- `viewer.py`：极简查看入口
+Key properties:
+- Each ticker gets an independent result; multi-ticker runs are parallelizable
+- Fallback reasons are observable in `audit["fallback_reasons"]`
+- Canonical outputs coexist with legacy tables — no migration required
 
-系统主线规划见 [roadmap.md](roadmap.md)，更完整的能力说明见 [docs/system-overview.md](docs/system-overview.md)，老板使用说明见 [docs/boss-manual.md](docs/boss-manual.md)。
+## Current Scope
 
-## 当前非目标
+Hermes is a complete, usable product loop for:
 
-Hermes 当前明确不做这些事：
+- Single-ticker research
+- Multi-ticker comparison
+- Structured signal generation (rating, confidence, entry, stop, take-profit, horizon, priority)
+- Trade plan generation (execute/inhibit, entry zone, sizing, expiry conditions)
+- Futu-first market context (snapshot, candles, option chain)
+- Viewer display (legacy + canonical + batch modes)
+- PDF export
+- SQLite persistence
+- Repo-level documentation standards (README/AGENT schema enforced in pytest)
 
-- 多人协作平台
-- 通用金融终端
-- 复杂产品化界面
-- 围绕老板主观行为做自适应策略
+## Not Yet the Goal
 
-它的重点始终是：
+Hermes is not trying to be:
 
-- 提升信号质量
-- 提升胜率与盈亏比
-- 提升长期 ROI
-- 提升执行清晰度
+- A multi-user platform
+- A full brokerage terminal
+- A distributed agent orchestration system
+- A self-improving autonomous trader
+- A production trading execution engine
 
-## 免责声明
+Current focus:
 
-Hermes 是研究与信号系统，不构成投资建议。
+**Make research stable, explainable, reviewable, and deliverable.**
 
-市场有风险，策略有效性会随市场环境变化。任何真实交易前，都应结合资金约束、风险承受能力和独立判断。
+## Repository Map
+
+| Path | Purpose |
+|---|---|
+| `agent/research_v1/` | Canonical research pipeline |
+| `agent/research_v1/analysts/` | Role-specific analyst modules (technical, fundamentals, news, sentiment, industry, options, risk, valuation) |
+| `agent/research_v1/data/` | Providers, Futu integration, database |
+| `tests/agent/research_v1/` | Unit, integration, and acceptance tests |
+| `docs/` | Architecture, workflow, acceptance, user-facing docs |
+| `.git_hooks/` | Local doc-sync tooling |
+
+## Documentation
+
+- [System Architecture](docs/system-architecture.md)
+- [Product Acceptance](docs/product-acceptance.md)
+- [Developer Workflow](docs/developer-workflow.md)
+- [Documentation Standards](docs/doc-standards.md)
+- [Boss Manual](docs/boss-manual.md)
+- [System Overview](docs/system-overview.md)
+
+## Repo Discipline
+
+Hermes enforces directory-level documentation standards through automated tests:
+
+- Every tracked directory must have `README.md` and `AGENT.md`
+- README files must contain required sections (What This Directory Is, Contents, Relationship, If You Modify, Data Flow)
+- AGENT files must contain required sections (Responsibilities, Boundaries, Key Interfaces, Upstream/Downstream, Change Propagation, Tests/Verification, What NOT)
+- Doc-sync behavior is validated in `test_doc_standards.py` and runs as part of the normal pytest suite
+
+Run the repo standards check:
+
+```bash
+pytest tests/agent/research_v1/test_doc_standards.py -v
+```
+
+## Disclaimer
+
+Hermes is a research and signal system — not investment advice.
+Markets carry risk; strategy effectiveness varies with market conditions.
+Always combine with your own judgment, capital constraints, and risk tolerance before trading.
 
 ## License
 

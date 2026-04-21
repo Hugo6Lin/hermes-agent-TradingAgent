@@ -1,5 +1,8 @@
-"""Minimal read-only web viewer for Hermes."""
+"""Read-only web viewer for Hermes research batches."""
 
+from __future__ import annotations
+
+import json
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -7,32 +10,67 @@ from urllib.parse import urlparse
 from agent.research_v1.data.database import ResearchDatabase
 
 
+def _build_legacy_snapshot(database: ResearchDatabase) -> dict:
+    """Collect the original signal-centric dashboard dataset."""
+    return {
+        "mode": "legacy",
+        "signals": database.list_recent_signals(limit=20),
+        "positions": database.list_positions(status="open", limit=20),
+        "paper_trades": database.list_paper_trades(status="open", limit=20),
+        "alerts": database.list_recent_alerts(unread_only=True, limit=20),
+    }
+
+
+def _fetch_canonical_report(cursor, batch_item_id: int) -> dict | None:
+    """Load the latest persisted report for a batch item."""
+    cursor.execute(
+        """
+        SELECT *
+        FROM company_reports
+        WHERE batch_item_id = ?
+        ORDER BY report_id DESC
+        LIMIT 1
+        """,
+        (batch_item_id,),
+    )
+    row = cursor.fetchone()
+    return dict(row) if row is not None else None
+
+
+def _attach_canonical_report(cursor, item: dict) -> dict:
+    """Attach the canonical report to a batch item without duplicating rows."""
+    report = _fetch_canonical_report(cursor, item["item_id"])
+    item["report"] = report
+    return item
+
+
 def _fetch_latest_batch(database: ResearchDatabase) -> dict | None:
     """Load the latest persisted research batch and its ticker items."""
     conn = database._get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT batch_id FROM research_batches ORDER BY batch_id DESC LIMIT 1")
-        row = cursor.fetchone()
-        if row is None:
+        cursor.execute("SELECT * FROM research_batches ORDER BY batch_id DESC LIMIT 1")
+        batch_row = cursor.fetchone()
+        if batch_row is None:
             return None
-        batch_id = row["batch_id"]
-        batch = database.get_research_batch(batch_id)
-        if batch is None:
-            return None
-        items = database.list_research_batch_items(batch_id)
-        for item in items:
-            conn2 = database._get_connection()
-            cursor2 = conn2.cursor()
-            try:
-                cursor2.execute(
-                    "SELECT * FROM company_reports WHERE batch_item_id = ? ORDER BY report_id DESC LIMIT 1",
-                    (item["item_id"],),
-                )
-                report_row = cursor2.fetchone()
-                item["report"] = dict(report_row) if report_row else None
-            finally:
-                conn2.close()
+
+        batch = dict(batch_row)
+        batch["requested_tickers"] = json.loads(batch["requested_tickers"])
+
+        cursor.execute(
+            """
+            SELECT *
+            FROM research_batch_items
+            WHERE batch_id = ?
+            ORDER BY display_rank ASC, updated_at DESC, item_id ASC
+            """,
+            (batch["batch_id"],),
+        )
+        items = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            items.append(_attach_canonical_report(cursor, item))
+
         return {
             "mode": "batch",
             "batch": batch,
@@ -51,17 +89,17 @@ def _fetch_batch_item_snapshot(database: ResearchDatabase, item_id: int) -> dict
         item_row = cursor.fetchone()
         if item_row is None:
             return None
+
         item = dict(item_row)
-        batch_id = item["batch_id"]
-        batch = database.get_research_batch(batch_id)
-        if batch is None:
+        cursor.execute("SELECT * FROM research_batches WHERE batch_id = ?", (item["batch_id"],))
+        batch_row = cursor.fetchone()
+        if batch_row is None:
             return None
-        cursor.execute(
-            "SELECT * FROM company_reports WHERE batch_item_id = ? ORDER BY report_id DESC LIMIT 1",
-            (item_id,),
-        )
-        report_row = cursor.fetchone()
-        item["report"] = dict(report_row) if report_row else None
+
+        batch = dict(batch_row)
+        batch["requested_tickers"] = json.loads(batch["requested_tickers"])
+
+        item = _attach_canonical_report(cursor, item)
         return {
             "mode": "batch",
             "batch": batch,
@@ -72,34 +110,11 @@ def _fetch_batch_item_snapshot(database: ResearchDatabase, item_id: int) -> dict
 
 
 def build_viewer_snapshot(database: ResearchDatabase) -> dict:
-    """Collect the minimal dashboard dataset from persisted tables.
-
-    Includes both legacy tables (signals, positions, paper_trades, alerts)
-    and canonical tables (canonical_signals, canonical_reports).
-    Gracefully degrades when canonical tables have not been initialized yet.
-    """
-    # Prefer latest batch if one exists
-    try:
-        batch_snapshot = _fetch_latest_batch(database)
-        if batch_snapshot is not None:
-            return batch_snapshot
-    except Exception:
-        pass
-
-    snapshot = {
-        "mode": "legacy",
-        "signals": database.list_recent_signals(limit=20),
-        "positions": database.list_positions(status="open", limit=20),
-        "paper_trades": database.list_paper_trades(status="open", limit=20),
-        "alerts": database.list_recent_alerts(unread_only=True, limit=20),
-    }
-    try:
-        snapshot["canonical_signals"] = database.list_canonical_signals(limit=20)
-        snapshot["canonical_reports"] = database.list_canonical_reports(limit=20)
-    except Exception:
-        snapshot["canonical_signals"] = []
-        snapshot["canonical_reports"] = []
-    return snapshot
+    """Collect the latest dashboard dataset from persisted research tables."""
+    batch_snapshot = _fetch_latest_batch(database)
+    if batch_snapshot is not None:
+        return batch_snapshot
+    return _build_legacy_snapshot(database)
 
 
 def build_end_of_day_summary(snapshot: dict) -> str:
@@ -114,18 +129,15 @@ def build_end_of_day_summary(snapshot: dict) -> str:
         )
 
     top_signal = "None"
-    if snapshot.get("signals"):
+    if snapshot["signals"]:
         ranked = sorted(snapshot["signals"], key=lambda item: item.get("priority_score", 0), reverse=True)
         top_signal = ranked[0]["symbol"]
-    elif snapshot.get("canonical_signals"):
-        ranked = sorted(snapshot["canonical_signals"], key=lambda item: item.get("priority_score", 0), reverse=True)
-        top_signal = ranked[0]["ticker"]
 
     return (
         f"Top signal: {top_signal}\n"
-        f"Open positions: {len(snapshot.get('positions', []))}\n"
-        f"Paper trades: {len(snapshot.get('paper_trades', []))}\n"
-        f"Unread alerts: {len(snapshot.get('alerts', []))}"
+        f"Open positions: {len(snapshot['positions'])}\n"
+        f"Paper trades: {len(snapshot['paper_trades'])}\n"
+        f"Unread alerts: {len(snapshot['alerts'])}"
     )
 
 
@@ -151,11 +163,116 @@ def _render_table(title: str, rows: list[dict], columns: list[str]) -> str:
     """
 
 
+def _render_legacy_dashboard_html(snapshot: dict) -> str:
+    signal_table = _render_table(
+        "Current Signals",
+        snapshot["signals"],
+        ["symbol", "grade", "priority_score", "confidence"],
+    )
+    position_table = _render_table(
+        "Open Positions",
+        snapshot["positions"],
+        ["symbol", "status", "quantity", "entry_price"],
+    )
+    paper_table = _render_table(
+        "Paper Trades",
+        snapshot["paper_trades"],
+        ["symbol", "status", "quantity", "entry_price"],
+    )
+    alert_table = _render_table(
+        "Alerts",
+        snapshot["alerts"],
+        ["symbol", "alert_type", "message"],
+    )
+    summary = escape(build_end_of_day_summary(snapshot)).replace("\n", "<br/>")
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Hermes Viewer</title>
+  <style>
+    :root {{
+      --bg: #f5efe1;
+      --panel: #fffaf0;
+      --ink: #1f2933;
+      --accent: #0f766e;
+      --line: #d6c7a6;
+    }}
+    body {{
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: linear-gradient(180deg, #efe4c8 0%, var(--bg) 55%, #f9f6ee 100%);
+      color: var(--ink);
+    }}
+    main {{
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }}
+    h1 {{
+      margin-bottom: 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      letter-spacing: 0.02em;
+    }}
+    .summary {{
+      background: rgba(15, 118, 110, 0.08);
+      border: 1px solid rgba(15, 118, 110, 0.2);
+      padding: 14px 16px;
+      border-radius: 14px;
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }}
+    .grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }}
+    .panel {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 12px 24px rgba(31, 41, 51, 0.06);
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }}
+    th, td {{
+      text-align: left;
+      padding: 8px 6px;
+      border-bottom: 1px solid rgba(214, 199, 166, 0.7);
+    }}
+    th {{
+      color: var(--accent);
+      font-weight: 700;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Hermes Minimal Viewer</h1>
+    <p>Signals, positions, alerts, and paper trades in one page.</p>
+    <div class="summary">{summary}</div>
+    <div class="grid">
+      {signal_table}
+      {position_table}
+      {paper_table}
+      {alert_table}
+    </div>
+  </main>
+</body>
+</html>
+"""
+
+
 def _render_batch_overview_html(snapshot: dict) -> str:
-    """Render batch overview page."""
     batch = snapshot["batch"]
     items = snapshot["items"]
-    requested_tickers = ", ".join(batch.get("requested_tickers", []))
+    requested_tickers = ", ".join(batch["requested_tickers"])
     top_item = items[0] if items else None
     cards = []
     for item in items:
@@ -231,6 +348,7 @@ def _render_batch_overview_html(snapshot: dict) -> str:
       border-radius: 22px;
       padding: 18px;
       box-shadow: 0 20px 40px rgba(2, 6, 23, 0.25);
+      backdrop-filter: blur(12px);
     }}
     .panel h2 {{
       margin-top: 0;
@@ -299,13 +417,24 @@ def _render_batch_overview_html(snapshot: dict) -> str:
 """
 
 
-def _render_ticker_detail_html(snapshot: dict) -> str:
-    """Render ticker detail page for a batch item."""
+def render_dashboard_html(snapshot: dict) -> str:
+    """Render the viewer for either the latest batch or the legacy dashboard."""
+    if snapshot.get("mode") == "batch":
+        return _render_batch_overview_html(snapshot)
+    return _render_legacy_dashboard_html(snapshot)
+
+
+def render_ticker_detail_html(snapshot: dict) -> str:
+    """Render the detail page for a single batch ticker item."""
+    if snapshot.get("mode") != "batch":
+        raise ValueError("ticker detail pages require a research batch snapshot")
+
     if not snapshot.get("items"):
         raise KeyError("ticker item missing")
+
     item = snapshot["items"][0]
-    batch = snapshot["batch"]
     report = item.get("report") or {}
+    batch = snapshot["batch"]
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -401,170 +530,44 @@ def _render_ticker_detail_html(snapshot: dict) -> str:
 """
 
 
-def render_dashboard_html(snapshot: dict) -> str:
-    """Render a single-page minimal dashboard."""
-    if snapshot.get("mode") == "batch":
-        return _render_batch_overview_html(snapshot)
-
-    signal_table = _render_table(
-        "Legacy Signals",
-        snapshot.get("signals", []),
-        ["symbol", "grade", "priority_score", "confidence"],
-    )
-    canonical_signal_table = _render_table(
-        "Canonical Signals",
-        snapshot.get("canonical_signals", []),
-        ["ticker", "rating", "priority_score", "confidence"],
-    )
-    canonical_report_table = _render_table(
-        "Canonical Reports",
-        snapshot.get("canonical_reports", []),
-        ["ticker", "title", "bottom_line"],
-    )
-    position_table = _render_table(
-        "Open Positions",
-        snapshot.get("positions", []),
-        ["symbol", "status", "quantity", "entry_price"],
-    )
-    paper_table = _render_table(
-        "Paper Trades",
-        snapshot.get("paper_trades", []),
-        ["symbol", "status", "quantity", "entry_price"],
-    )
-    alert_table = _render_table(
-        "Alerts",
-        snapshot.get("alerts", []),
-        ["symbol", "alert_type", "message"],
-    )
-    summary = escape(build_end_of_day_summary(snapshot)).replace("\n", "<br/>")
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Hermes Viewer</title>
-  <style>
-    :root {{
-      --bg: #f5efe1;
-      --panel: #fffaf0;
-      --ink: #1f2933;
-      --accent: #0f766e;
-      --line: #d6c7a6;
-    }}
-    body {{
-      margin: 0;
-      font-family: Georgia, "Times New Roman", serif;
-      background: linear-gradient(180deg, #efe4c8 0%, var(--bg) 55%, #f9f6ee 100%);
-      color: var(--ink);
-    }}
-    main {{
-      max-width: 1080px;
-      margin: 0 auto;
-      padding: 32px 20px 48px;
-    }}
-    h1 {{
-      margin-bottom: 8px;
-      font-size: clamp(2rem, 4vw, 3rem);
-      letter-spacing: 0.02em;
-    }}
-    .summary {{
-      background: rgba(15, 118, 110, 0.08);
-      border: 1px solid rgba(15, 118, 110, 0.2);
-      padding: 14px 16px;
-      border-radius: 14px;
-      margin-bottom: 20px;
-      line-height: 1.6;
-    }}
-    .grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px;
-    }}
-    .panel {{
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 16px;
-      box-shadow: 0 12px 24px rgba(31, 41, 51, 0.06);
-    }}
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.95rem;
-    }}
-    th, td {{
-      text-align: left;
-      padding: 8px 6px;
-      border-bottom: 1px solid rgba(214, 199, 166, 0.7);
-    }}
-    th {{
-      color: var(--accent);
-      font-weight: 700;
-    }}
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Hermes Minimal Viewer</h1>
-    <p>Signals, positions, alerts, and paper trades in one page.</p>
-    <div class="summary">{summary}</div>
-    <div class="grid">
-      {signal_table}
-      {canonical_signal_table}
-      {canonical_report_table}
-      {position_table}
-      {paper_table}
-      {alert_table}
-    </div>
-  </main>
-</body>
-</html>
-"""
-
-
 def serve_viewer(database: ResearchDatabase, host: str = "127.0.0.1", port: int = 8008) -> ThreadingHTTPServer:
     """Create a tiny HTTP server for the Hermes dashboard."""
 
     class _ViewerHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
-            path = urlparse(self.path).path.rstrip("/")
-
-            if path.startswith("/ticker/"):
-                try:
-                    item_id = int(path.split("/")[-1])
-                    snapshot = _fetch_batch_item_snapshot(database, item_id)
-                    if snapshot is None:
-                        html = b"<html><body><h1>Not Found</h1></body></html>"
-                        self.send_response(404)
-                    else:
-                        html = _render_ticker_detail_html(snapshot).encode("utf-8")
-                        self.send_response(200)
-                except (ValueError, IndexError):
-                    html = b"<html><body><h1>Invalid ticker ID</h1></body></html>"
-                    self.send_response(400)
-                content_type = "text/html; charset=utf-8"
-
-            elif path == "/batches/latest":
-                snapshot = _fetch_latest_batch(database)
-                if snapshot is None:
-                    html = b"<html><body><h1>No batches found</h1></body></html>"
-                    self.send_response(404)
-                else:
-                    html = render_dashboard_html(snapshot).encode("utf-8")
-                    self.send_response(200)
-                content_type = "text/html; charset=utf-8"
-
-            else:
-                snapshot = build_viewer_snapshot(database)
-                html = render_dashboard_html(snapshot).encode("utf-8")
-                self.send_response(200)
-                content_type = "text/html; charset=utf-8"
-
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(html)))
+        def _send_html(self, html: str, status: int = 200) -> None:
+            payload = html.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
-            self.wfile.write(html)
+            self.wfile.write(payload)
+
+        def do_GET(self) -> None:  # noqa: N802
+            path = urlparse(self.path).path
+            normalized_path = path.rstrip("/") if path != "/" else "/"
+
+            snapshot = build_viewer_snapshot(database)
+            if normalized_path in {"/", "/batches/latest"}:
+                self._send_html(render_dashboard_html(snapshot))
+                return
+
+            if normalized_path.startswith("/ticker/"):
+                raw_item_id = normalized_path.removeprefix("/ticker/")
+                try:
+                    item_id = int(raw_item_id)
+                except ValueError:
+                    self.send_error(404, "Ticker item not found")
+                    return
+                try:
+                    detail_snapshot = _fetch_batch_item_snapshot(database, item_id)
+                    if detail_snapshot is None:
+                        raise KeyError(item_id)
+                    self._send_html(render_ticker_detail_html(detail_snapshot))
+                except (KeyError, ValueError):
+                    self.send_error(404, "Ticker item not found")
+                return
+
+            self.send_error(404, "Page not found")
 
         def log_message(self, format: str, *args) -> None:  # noqa: A003
             return

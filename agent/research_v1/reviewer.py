@@ -1,152 +1,212 @@
-"""Reviewer Agent - Quality reviewer for research reports."""
+"""
+Reviewer Extension Point — Quality reviewer for canonical research outputs.
 
-from typing import Any
+The reviewer is an OPTIONAL extension to the research pipeline:
+- It is NEVER the decision authority (Final Judge holds that role)
+- It annotates signal/report quality and flags concerns
+- Its verdict is a recommendation only — product surface decides how to use it
+- When not configured, the pipeline proceeds without review
 
-from agent.research_v1.llm_clients import BaseLLMClient
+The reviewer consumes ONLY the bounded ReviewInputPacket and produces a
+CanonicalReview. It does NOT read arbitrary upstream state.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent.research_v1.contracts import (
+        CanonicalSignal,
+        CanonicalReport,
+        ReviewInputPacket,
+        CanonicalReview,
+        ReviewVerdict,
+    )
 
 
-class ReviewerAgent:
-    """Quality reviewer - finds errors and hallucinations in reports."""
+class Reviewer:
+    """
+    Quality reviewer extension for canonical research outputs.
 
-    def __init__(self, llm_client: BaseLLMClient):
-        """Initialize ReviewerAgent.
+    The reviewer inspects the final judge's output (CanonicalSignal,
+    CanonicalReport) and the orchestrator's evidence bundle for quality
+    signals. It does NOT override or re-judge — it only annotates.
 
-        Args:
-            llm_client: LLM client for generating review analysis.
+    This class is the canonical reviewer implementation. It is designed to
+    be replaced/extended by a more sophisticated LLM-powered reviewer in
+    production deployments. The extension point contract (ReviewInputPacket
+    → CanonicalReview) is stable; only the implementation changes.
+    """
+
+    def review(self, packet: ReviewInputPacket) -> CanonicalReview:
         """
-        self.llm = llm_client
-        self.system_prompt = """You are a quality reviewer.
-You MUST find at least 1 potential hallucination point.
-You MUST find at least 1 data source issue.
-Critical issues > 2 means report should be rejected."""
-
-    def review(self, research_report: dict, analyst_reports: dict) -> dict:
-        """Review research report quality.
+        Perform a quality review of the final judge's output.
 
         Args:
-            research_report: The research report to review.
-            analyst_reports: Dictionary of analyst reports for reference.
+            packet: Bounded ReviewInputPacket from orchestrator.
 
         Returns:
-            dict with keys:
-                - errors: list of error dicts with severity, type, description
-                - critical_count: int count of critical issues
-                - overall_quality: "pass" | "needs_revision" | "failed"
+            CanonicalReview annotation (verdict + flags + annotations).
+
+        Raises:
+            ValueError: If the packet fails validation.
         """
-        errors = []
+        from agent.research_v1.contracts import CanonicalReview, ReviewVerdict
 
-        # Check for hallucinations - claims not supported by analyst reports
-        hallucinations = self._check_hallucinations(research_report, analyst_reports)
-        errors.extend(hallucinations)
+        flags: list[str] = []
+        annotations: list[str] = []
 
-        # Check for data source issues
-        source_issues = self._check_data_sources(research_report, analyst_reports)
-        errors.extend(source_issues)
+        signal = packet.signal
+        report = packet.report
 
-        # Count critical issues
-        critical_count = sum(1 for e in errors if e.get("severity") == "critical")
+        # --- Signal quality checks ---
+        if signal is not None:
+            # Flag very low confidence signals
+            if signal.confidence < 0.5:
+                flags.append("low_confidence")
+                annotations.append(
+                    f"Signal confidence {signal.confidence:.0%} is below 50%; "
+                    "verify evidence quality before acting."
+                )
 
-        # Determine overall quality
-        if critical_count > 2:
-            overall_quality = "failed"
-        elif errors:
-            overall_quality = "needs_revision"
+            # Flag very low priority scores
+            if signal.priority_score < 40:
+                flags.append("low_priority_score")
+                annotations.append(
+                    f"Priority score {signal.priority_score:.1f} is below 40; "
+                    "signal may not meet minimum quality threshold."
+                )
+
+            # Flag conflicting orchestrator flags
+            if "direction_conflict_detected" in signal.risk_flags:
+                flags.append("conflict_in_signal")
+                annotations.append(
+                    "Direction conflict was detected by orchestrator and "
+                    "carried into signal risk_flags. Verify resolution."
+                )
+
+        # --- Report quality checks ---
+        if report is not None:
+            # Flag very short executive summary
+            if len(report.executive_summary) < 50:
+                flags.append("thin_executive_summary")
+                annotations.append(
+                    "Executive summary is unusually brief; "
+                    "verify adequate evidence was provided."
+                )
+
+            # Flag missing bull/bear case content
+            if len(report.bull_case) < 20:
+                flags.append("weak_bull_case")
+                annotations.append("Bull case summary is thin; verify bullish evidence coverage.")
+            if len(report.bear_case) < 20:
+                flags.append("weak_bear_case")
+                annotations.append("Bear case summary is thin; verify bearish evidence coverage.")
+
+        # --- Orchestrator flag passthrough ---
+        for flag in packet.orchestrator_flags:
+            if flag not in flags:
+                flags.append(f"orchestrator:{flag}")
+
+        # --- Derive verdict ---
+        verdict = self._derive_verdict(flags, signal, report)
+
+        # --- Recommended action ---
+        recommended_action = {
+            ReviewVerdict.PASS: "proceed",
+            ReviewVerdict.NEEDS_REVISION: "escalate",
+            ReviewVerdict.REJECTED: "block",
+        }[verdict]
+
+        # --- Quality score ---
+        quality_score = self._compute_quality_score(flags, signal, report)
+
+        return CanonicalReview(
+            task_id=packet.task_id,
+            ticker=packet.ticker,
+            verdict=verdict,
+            quality_score=quality_score,
+            flags=flags,
+            annotations=annotations,
+            recommended_action=recommended_action,
+            review_reason=self._summarize_review(verdict, flags, signal, report),
+        )
+
+    def _derive_verdict(
+        self,
+        flags: list[str],
+        signal: CanonicalSignal | None,
+        report: CanonicalReport | None,
+    ) -> ReviewVerdict:
+        """Determine the review verdict from quality signals."""
+        from agent.research_v1.contracts import ReviewVerdict
+
+        # Any hard blockers → rejected
+        if signal is not None and signal.confidence < 0.35:
+            return ReviewVerdict.REJECTED
+
+        critical_flags = {"conflict_in_signal", "low_priority_score"}
+        if any(f in critical_flags for f in flags):
+            return ReviewVerdict.NEEDS_REVISION
+
+        if len(flags) > 2:
+            return ReviewVerdict.NEEDS_REVISION
+
+        return ReviewVerdict.PASS
+
+    def _compute_quality_score(
+        self,
+        flags: list[str],
+        signal: CanonicalSignal | None,
+        report: CanonicalReport | None,
+    ) -> float:
+        """Compute a 0.0–1.0 quality score."""
+        score = 1.0
+
+        # Penalize per flag
+        score -= len(flags) * 0.05
+
+        # Penalize low confidence
+        if signal is not None and signal.confidence < 0.6:
+            score -= (0.6 - signal.confidence) * 0.3
+
+        # Penalize thin narrative
+        if report is not None:
+            if len(report.executive_summary) < 80:
+                score -= 0.05
+            if len(report.bull_case) < 40 or len(report.bear_case) < 40:
+                score -= 0.05
+
+        return max(0.0, min(1.0, round(score, 3)))
+
+    def _summarize_review(
+        self,
+        verdict: ReviewVerdict,
+        flags: list[str],
+        signal: CanonicalSignal | None,
+        report: CanonicalReport | None,
+    ) -> str:
+        """Build a brief human-readable review summary."""
+        parts = [f"Verdict: {verdict.value}."]
+        if flags:
+            parts.append(f"Flags ({len(flags)}): {', '.join(flags[:3])}.")
         else:
-            overall_quality = "pass"
+            parts.append("No quality flags raised.")
+        if signal is not None:
+            parts.append(f"Signal confidence {signal.confidence:.0%}, priority {signal.priority_score:.1f}.")
+        return " ".join(parts)
 
-        return {
-            "errors": errors,
-            "critical_count": critical_count,
-            "overall_quality": overall_quality
-        }
 
-    def _check_hallucinations(self, research_report: dict, analyst_reports: dict) -> list:
-        """Check for potential hallucinations in the report.
+def review(packet: ReviewInputPacket) -> CanonicalReview:
+    """
+    Convenience function for quality review.
 
-        Args:
-            research_report: The research report to check.
-            analyst_reports: Reference analyst reports.
+    Args:
+        packet: Bounded ReviewInputPacket from orchestrator.
 
-        Returns:
-            List of hallucination error dicts.
-        """
-        errors = []
-        hallucinations_found = False
-
-        # Look for claims in research report that conflict with analyst reports
-        research_text = research_report.get("content", "").lower()
-
-        for analyst_type, report_data in analyst_reports.items():
-            if not isinstance(report_data, dict):
-                continue
-
-            analyst_text = report_data.get("report", "").lower()
-
-            # Check for key claims that might be fabricated
-            # Simple heuristic: if research report mentions specific numbers
-            # that don't appear in any analyst report, flag as potential hallucination
-            import re
-            numbers_in_research = re.findall(r'\$?\d+\.?\d*%?', research_text)
-            numbers_in_analyst = re.findall(r'\$?\d+\.?\d*%?', analyst_text)
-
-            # If there are many numbers in research but few match analyst reports,
-            # flag as potential hallucination
-            matching_numbers = set(numbers_in_research) & set(numbers_in_analyst)
-            if len(numbers_in_research) > 5 and len(matching_numbers) < len(numbers_in_research) * 0.3:
-                if not hallucinations_found:
-                    errors.append({
-                        "severity": "critical",
-                        "type": "hallucination",
-                        "description": "Potential hallucination detected: report contains claims not supported by analyst data"
-                    })
-                    hallucinations_found = True
-                break
-
-        # Ensure we always find at least 1 hallucination per system prompt requirement
-        if not hallucinations_found and analyst_reports:
-            errors.append({
-                "severity": "medium",
-                "type": "hallucination",
-                "description": "Potential hallucination: verify all numerical claims against source data"
-            })
-
-        return errors
-
-    def _check_data_sources(self, research_report: dict, analyst_reports: dict) -> list:
-        """Check for data source issues in the report.
-
-        Args:
-            research_report: The research report to check.
-            analyst_reports: Reference analyst reports.
-
-        Returns:
-            List of data source error dicts.
-        """
-        errors = []
-        source_issues_found = False
-
-        # Check if research report references data that analysts didn't provide
-        research_text = research_report.get("content", "")
-
-        # Look for common data source indicators
-        data_indicators = ["cited", "according to", "source", "data from", "reported by"]
-        has_source_attribution = any(indicator in research_text.lower() for indicator in data_indicators)
-
-        if analyst_reports and not has_source_attribution:
-            if not source_issues_found:
-                errors.append({
-                    "severity": "medium",
-                    "type": "data_source",
-                    "description": "Report lacks clear data source attribution for claims"
-                })
-                source_issues_found = True
-
-        # Ensure we always find at least 1 data source issue per system prompt requirement
-        if not source_issues_found and analyst_reports:
-            errors.append({
-                "severity": "minor",
-                "type": "data_source",
-                "description": "Consider adding more specific source citations for key claims"
-            })
-
-        return errors
+    Returns:
+        CanonicalReview annotation.
+    """
+    reviewer = Reviewer()
+    return reviewer.review(packet)

@@ -1,4 +1,5 @@
 """SQLite database schemas for research system."""
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -19,6 +20,10 @@ class ResearchDatabase:
         """Get a database connection."""
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        # Always store as UTF-8 and read as UTF-8 to avoid Windows cp1252/mbcs mis-decoding
+        conn.execute("PRAGMA encoding = 'UTF-8'")
+        conn.text_factory = lambda b: b.decode("utf-8", errors="replace")
         return conn
 
     def initialize(self) -> None:
@@ -199,6 +204,63 @@ class ResearchDatabase:
                 status TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+
+    def initialize_batch_research(self) -> None:
+        """Initialize batch research tables: research_batches, research_batch_items, company_reports."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS research_batches (
+                batch_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                requested_tickers_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                boss_summary TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS research_batch_items (
+                item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                display_rank INTEGER NOT NULL,
+                overall_rating TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                priority_score REAL NOT NULL,
+                action TEXT NOT NULL,
+                top_thesis TEXT NOT NULL,
+                top_risk TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                stop_loss REAL NOT NULL,
+                take_profit REAL NOT NULL,
+                holding_horizon TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (batch_id) REFERENCES research_batches(batch_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS company_reports (
+                report_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_item_id INTEGER NOT NULL,
+                bottom_line TEXT NOT NULL,
+                why_it_matters TEXT NOT NULL,
+                action_plan TEXT NOT NULL,
+                bull_case TEXT NOT NULL,
+                risk_watch TEXT NOT NULL,
+                research_summary TEXT NOT NULL,
+                signal_snapshot_json TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (batch_item_id) REFERENCES research_batch_items(item_id)
             )
         """)
 
@@ -798,3 +860,539 @@ class ResearchDatabase:
             }
 
         return dict(row)
+
+    # --- Canonical research core ---
+
+    def initialize_research_core(self) -> None:
+        """Initialize canonical object tables: research_tasks, subagent_tasks, evidence_items, judge_packets, canonical_signals, canonical_reports."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS research_tasks (
+                task_id TEXT PRIMARY KEY,
+                request_text TEXT NOT NULL,
+                task_type TEXT NOT NULL,
+                tickers_json TEXT NOT NULL,
+                markets_json TEXT NOT NULL DEFAULT '[]',
+                research_mode TEXT NOT NULL DEFAULT 'standard',
+                time_horizon TEXT NOT NULL DEFAULT '',
+                output_mode TEXT NOT NULL DEFAULT 'signal_and_report',
+                constraints_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS subagent_tasks (
+                subtask_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                agent_role TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                objective TEXT NOT NULL,
+                required_context_json TEXT NOT NULL DEFAULT '{}',
+                expected_schema_json TEXT NOT NULL DEFAULT '{}',
+                priority INTEGER NOT NULL DEFAULT 1,
+                deadline_hint TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id) REFERENCES research_tasks(task_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS evidence_items (
+                evidence_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                subtask_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                agent_role TEXT NOT NULL,
+                claim_type TEXT NOT NULL DEFAULT 'factual',
+                claim TEXT NOT NULL,
+                value_json TEXT NOT NULL DEFAULT 'null',
+                confidence REAL NOT NULL DEFAULT 0.0,
+                direction TEXT NOT NULL DEFAULT 'neutral',
+                importance TEXT NOT NULL DEFAULT 'medium',
+                source_refs_json TEXT NOT NULL DEFAULT '[]',
+                raw_payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id) REFERENCES research_tasks(task_id),
+                FOREIGN KEY (subtask_id) REFERENCES subagent_tasks(subtask_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS judge_packets (
+                packet_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                task_summary TEXT NOT NULL,
+                evidence_bundle_json TEXT NOT NULL,
+                required_outputs_json TEXT NOT NULL DEFAULT '[]',
+                conflict_flags_json TEXT NOT NULL DEFAULT '[]',
+                missing_steps_json TEXT NOT NULL DEFAULT '[]',
+                orchestrator_notes TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id) REFERENCES research_tasks(task_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS canonical_signals (
+                signal_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                rating TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                priority_score REAL NOT NULL DEFAULT 0.0,
+                entry_price REAL,
+                stop_loss REAL,
+                take_profit REAL,
+                holding_horizon TEXT NOT NULL DEFAULT '',
+                signal_valid_until TIMESTAMP,
+                risk_flags_json TEXT NOT NULL DEFAULT '[]',
+                decision_reason TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id) REFERENCES research_tasks(task_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS canonical_reports (
+                report_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                title TEXT NOT NULL,
+                executive_summary TEXT NOT NULL DEFAULT '',
+                bottom_line TEXT NOT NULL DEFAULT '',
+                why_now TEXT NOT NULL DEFAULT '',
+                bull_case TEXT NOT NULL DEFAULT '',
+                bear_case TEXT NOT NULL DEFAULT '',
+                trade_plan_json TEXT NOT NULL DEFAULT 'null',
+                risk_watch_json TEXT NOT NULL DEFAULT '[]',
+                key_evidence_json TEXT NOT NULL DEFAULT '[]',
+                appendix_json TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id) REFERENCES research_tasks(task_id)
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+
+    def save_research_task(self, task: "ResearchTask") -> None:
+        """Persist a ResearchTask record so child tables (canonical_signals, etc.) satisfy FK constraints."""
+        import json
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO research_tasks (
+                    task_id, request_text, task_type, tickers_json, markets_json,
+                    research_mode, time_horizon, output_mode, constraints_json, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task.task_id,
+                    task.request_text,
+                    task.task_type.value,
+                    json.dumps(task.tickers),
+                    json.dumps(task.markets),
+                    task.research_mode.value,
+                    task.time_horizon,
+                    task.output_mode.value,
+                    json.dumps(task.constraints),
+                    task.status.value,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_canonical_signal(self, signal: "CanonicalSignal", task_id: str) -> str:
+        """Persist a CanonicalSignal. Returns signal_id."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            signal_id = f"signal_{task_id}_{signal.ticker}"
+            cursor.execute(
+                """
+                INSERT INTO canonical_signals (
+                    signal_id, task_id, ticker, rating, confidence, priority_score,
+                    entry_price, stop_loss, take_profit, holding_horizon,
+                    signal_valid_until, risk_flags_json, decision_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    signal_id,
+                    task_id,
+                    signal.ticker,
+                    signal.rating,
+                    signal.confidence,
+                    signal.priority_score,
+                    signal.entry_price,
+                    signal.stop_loss,
+                    signal.take_profit,
+                    signal.holding_horizon,
+                    signal.signal_valid_until.isoformat() if signal.signal_valid_until else None,
+                    json.dumps(signal.risk_flags),
+                    signal.decision_reason,
+                )
+            )
+            conn.commit()
+            return signal_id
+        finally:
+            conn.close()
+
+    def save_canonical_report(self, report: "CanonicalReport", task_id: str, ticker: str) -> str:
+        """Persist a CanonicalReport. Returns report_id."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            report_id = f"report_{task_id}_{report.title[:20].replace(' ', '_')}"
+            trade_plan_dict = None
+            if report.trade_plan is not None:
+                tp = report.trade_plan
+                trade_plan_dict = {
+                    "action": tp.action,
+                    "entry_price": tp.entry_price,
+                    "stop_loss": tp.stop_loss,
+                    "take_profit": tp.take_profit,
+                    "size_hint": tp.size_hint,
+                    "holding_period": tp.holding_period,
+                }
+            cursor.execute(
+                """
+                INSERT INTO canonical_reports (
+                    report_id, task_id, ticker, title, executive_summary,
+                    bottom_line, why_now, bull_case, bear_case,
+                    trade_plan_json, risk_watch_json, key_evidence_json, appendix_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    report_id,
+                    task_id,
+                    ticker,
+                    report.title,
+                    report.executive_summary,
+                    report.bottom_line,
+                    report.why_now,
+                    report.bull_case,
+                    report.bear_case,
+                    json.dumps(trade_plan_dict),
+                    json.dumps(report.risk_watch),
+                    json.dumps(report.key_evidence),
+                    json.dumps(report.appendix),
+                )
+            )
+            conn.commit()
+            return report_id
+        finally:
+            conn.close()
+
+    def list_canonical_signals(self, limit: int = 20) -> list[dict]:
+        """List canonical signals ordered by newest first."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM canonical_signals ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        results = []
+        for row in rows:
+            d = dict(row)
+            d['risk_flags'] = json.loads(d.pop('risk_flags_json', '[]'))
+            results.append(d)
+        return results
+
+    def list_canonical_reports(self, limit: int = 20) -> list[dict]:
+        """List canonical reports ordered by newest first."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM canonical_reports ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        results = []
+        for row in rows:
+            d = dict(row)
+            d['trade_plan'] = json.loads(d.pop('trade_plan_json', 'null'))
+            d['risk_watch'] = json.loads(d.pop('risk_watch_json', '[]'))
+            d['key_evidence'] = json.loads(d.pop('key_evidence_json', '[]'))
+            d['appendix'] = json.loads(d.pop('appendix_json', '{}'))
+            results.append(d)
+        return results
+
+    def get_canonical_reports_by_task(self, task_id: str) -> list[dict]:
+        """Get all canonical reports for a research task."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM canonical_reports WHERE task_id = ? ORDER BY created_at DESC",
+            (task_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        results = []
+        for row in rows:
+            d = dict(row)
+            d['trade_plan'] = json.loads(d.pop('trade_plan_json', 'null'))
+            d['risk_watch'] = json.loads(d.pop('risk_watch_json', '[]'))
+            d['key_evidence'] = json.loads(d.pop('key_evidence_json', '[]'))
+            d['appendix'] = json.loads(d.pop('appendix_json', '{}'))
+            results.append(d)
+        return results
+
+    # --- Batch research persistence ---
+
+    def save_research_batch_payload(self, payload: dict) -> dict:
+        """Persist a structured batch payload. Returns dict with batch_id, item_ids, report_ids."""
+        import json
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            # Ensure batch tables exist
+            self.initialize_batch_research()
+
+            title = payload["title"]
+            tickers = payload["tickers"]
+            status = payload.get("status", "completed")
+            boss_summary = payload.get("boss_summary", "")
+
+            cursor.execute(
+                """
+                INSERT INTO research_batches (title, requested_tickers_json, status, boss_summary)
+                VALUES (?, ?, ?, ?)
+                """,
+                (title, json.dumps([t["symbol"] for t in tickers]), status, boss_summary),
+            )
+            batch_id = cursor.lastrowid
+
+            item_ids = []
+            report_ids = []
+
+            for ticker_data in tickers:
+                cursor.execute(
+                    """
+                    INSERT INTO research_batch_items (
+                        batch_id, symbol, display_rank, overall_rating, confidence,
+                        priority_score, action, top_thesis, top_risk,
+                        entry_price, stop_loss, take_profit, holding_horizon
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        batch_id,
+                        ticker_data["symbol"],
+                        ticker_data["display_rank"],
+                        ticker_data["overall_rating"],
+                        ticker_data["confidence"],
+                        ticker_data["priority_score"],
+                        ticker_data["action"],
+                        ticker_data["top_thesis"],
+                        ticker_data["top_risk"],
+                        ticker_data["entry_price"],
+                        ticker_data["stop_loss"],
+                        ticker_data["take_profit"],
+                        ticker_data["holding_horizon"],
+                    ),
+                )
+                item_id = cursor.lastrowid
+                item_ids.append(item_id)
+
+                report_data = ticker_data["report"]
+                cursor.execute(
+                    """
+                    INSERT INTO company_reports (
+                        batch_item_id, bottom_line, why_it_matters, action_plan,
+                        bull_case, risk_watch, research_summary, signal_snapshot_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item_id,
+                        report_data["bottom_line"],
+                        report_data["why_it_matters"],
+                        report_data["action_plan"],
+                        report_data["bull_case"],
+                        json.dumps(report_data["risk_watch"]) if isinstance(report_data["risk_watch"], list) else report_data["risk_watch"],
+                        report_data["research_summary"],
+                        json.dumps(report_data["signal_snapshot_json"]) if isinstance(report_data["signal_snapshot_json"], dict) else report_data["signal_snapshot_json"],
+                    ),
+                )
+                report_ids.append(cursor.lastrowid)
+
+            conn.commit()
+            return {
+                "batch_id": batch_id,
+                "item_ids": item_ids,
+                "report_ids": report_ids,
+            }
+        finally:
+            conn.close()
+
+    def create_research_batch(
+        self,
+        title: str,
+        requested_tickers: list[str],
+        boss_summary: str = "",
+        status: str = "completed",
+    ) -> int:
+        """Create a new research batch. Returns the new batch_id."""
+        import json
+        self.initialize_batch_research()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO research_batches (title, requested_tickers_json, status, boss_summary)
+                VALUES (?, ?, ?, ?)
+                """,
+                (title, json.dumps(requested_tickers), status, boss_summary),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def add_research_batch_item(
+        self,
+        batch_id: int,
+        symbol: str,
+        display_rank: int,
+        overall_rating: str,
+        confidence: float,
+        priority_score: float,
+        action: str,
+        top_thesis: str,
+        top_risk: str,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        holding_horizon: str,
+    ) -> int:
+        """Add a ticker item to an existing research batch. Returns the new item_id."""
+        self.initialize_batch_research()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO research_batch_items (
+                    batch_id, symbol, display_rank, overall_rating, confidence,
+                    priority_score, action, top_thesis, top_risk,
+                    entry_price, stop_loss, take_profit, holding_horizon
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    batch_id, symbol, display_rank, overall_rating, confidence,
+                    priority_score, action, top_thesis, top_risk,
+                    entry_price, stop_loss, take_profit, holding_horizon,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def save_company_report(
+        self,
+        batch_item_id: int,
+        bottom_line: str,
+        why_it_matters: str,
+        action_plan: str,
+        bull_case: str,
+        risk_watch: str,
+        research_summary: str,
+        signal_snapshot_json: str,
+    ) -> int:
+        """Save a company report for a batch item. Returns the new report_id."""
+        self.initialize_batch_research()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO company_reports (
+                    batch_item_id, bottom_line, why_it_matters, action_plan,
+                    bull_case, risk_watch, research_summary, signal_snapshot_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    batch_item_id, bottom_line, why_it_matters, action_plan,
+                    bull_case, risk_watch, research_summary, signal_snapshot_json,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def get_research_batch(self, batch_id: int) -> Optional[dict]:
+        """Get a research batch by ID."""
+        import json
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM research_batches WHERE batch_id = ?", (batch_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row is None:
+            return None
+        d = dict(row)
+        d["requested_tickers"] = json.loads(d.pop("requested_tickers_json", "[]"))
+        return d
+
+    def get_research_batch_with_items_and_reports(self, batch_id: int) -> Optional[dict]:
+        """Get a research batch with its items and reports."""
+        import json
+        batch = self.get_research_batch(batch_id)
+        if batch is None:
+            return None
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT * FROM research_batch_items WHERE batch_id = ? ORDER BY display_rank ASC",
+                (batch_id,),
+            )
+            items = []
+            for item_row in cursor.fetchall():
+                item = dict(item_row)
+                cursor.execute(
+                    "SELECT * FROM company_reports WHERE batch_item_id = ? ORDER BY report_id DESC LIMIT 1",
+                    (item["item_id"],),
+                )
+                report_row = cursor.fetchone()
+                item["report"] = dict(report_row) if report_row else None
+                items.append(item)
+            batch = dict(batch)
+            batch["items"] = items
+            return batch
+        finally:
+            conn.close()
+
+    def list_research_batch_items(self, batch_id: int) -> list[dict]:
+        """List all items for a research batch."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM research_batch_items WHERE batch_id = ? ORDER BY display_rank ASC",
+            (batch_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_company_report(self, report_id: int) -> Optional[dict]:
+        """Get a company report by ID."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM company_reports WHERE report_id = ?", (report_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
