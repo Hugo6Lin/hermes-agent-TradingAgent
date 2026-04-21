@@ -53,10 +53,14 @@ from agent.research_v1.trade_plan import TradePlanGenerator
 from agent.research_v1.market_data_service import MarketDataService
 from agent.research_v1.thesis_engine import ThesisEngine
 from agent.research_v1.instrument_selection import InstrumentSelectionEngine
+from agent.research_v1.options_decision import OptionsDecisionEngine
+from agent.research_v1.early_exit import EarlyExitEngine
 from agent.research_v1.contracts import (
     UnderlyingThesis,
     InstrumentRecommendation,
     PositionDecisionCard,
+    OptionsStructure,
+    EarlyExitPlan,
     VALID_BULLISH_ACTIONS,
 )
 
@@ -83,6 +87,9 @@ class TickerResearchResult:
     thesis: UnderlyingThesis | None = None
     instrument_recommendation: InstrumentRecommendation | None = None
     decision_card: PositionDecisionCard | None = None
+    # Phase 15: options structure and early exit
+    options_structure: OptionsStructure | None = None
+    early_exit: EarlyExitPlan | None = None
 
 
 @dataclass
@@ -140,6 +147,9 @@ class HermesResearchApp:
         # Phase 14: bullish decision engines
         self._thesis_engine = ThesisEngine()
         self._instrument_selector = InstrumentSelectionEngine()
+        # Phase 15: options structure and early exit engines
+        self._options_decision_engine = OptionsDecisionEngine()
+        self._early_exit_engine = EarlyExitEngine()
 
     def run(self, request: str) -> ResearchResult:
         """
@@ -222,6 +232,24 @@ class HermesResearchApp:
             errors=global_errors,
         )
 
+    def _instrument_action_to_trade_plan_action(self, primary_action: str) -> str:
+        """
+        Map Phase 14 instrument action names to trade_plan action names.
+
+        Phase 14 instrument actions use human-friendly names
+        (e.g. 'Sell Cash-Secured Put') while trade_plan uses simpler
+        action names (BUY/SELL/etc). This maps between them.
+        """
+        return {
+            "Buy Stock": "BUY",
+            "Buy Call": "BUY",
+            "Bull Call Spread": "BUY",
+            "Sell Cash-Secured Put": "SELL",
+            "Covered Call": "SELL",
+            "Watchlist": "HOLD",
+            "No Trade": "HOLD",
+        }.get(primary_action, "HOLD")
+
     def _extract_thesis_inputs(
         self,
         bundle: EvidenceBundle,
@@ -230,36 +258,113 @@ class HermesResearchApp:
         """
         Extract inputs for ThesisEngine from evidence bundle and market context.
 
-        Phase 14: pulls quality, valuation, and catalyst signals from the evidence
-        items produced by the subagents. This is additive — it does not modify the
-        canonical signal/report produced by FinalJudge.
+        Phase 14: pulls quality, valuation, and catalyst signals from real EvidenceItem
+        fields produced by EvidenceStore normalization:
+            - item.direction  — Direction.BULLISH/BEARISH/NEUTRAL/MIXED
+            - item.confidence — float 0.0–1.0 (set by EvidenceStore from analyst output)
+            - item.claim — string like "Verdict: buy", "upside_pct: 0.22"
+            - item.value — analyst-structured value (may be dict, string, or numeric)
+
+        This correctly handles the actual EvidenceStore._extract_from_summary() output
+        shapes: verdict items, sentiment items, numeric metric items.
         """
-        fundamentals: dict = {}
-        valuation: dict = {}
-        catalysts: dict = {}
+        import re
+        from agent.research_v1.contracts import Direction
+
+        fundamentals_confidences: list[float] = []
+        fundamentals_bullish_count: int = 0
+        fundamentals_bearish_count: int = 0
+
+        valuation_upside: float | None = None
+        valuation_confidence: float = 0.5
+
+        catalysts_confidences: list[float] = []
+        catalysts_bullish_count: int = 0
+
         option_context: dict = {}
         holding_context: dict = {"has_stock": False}
 
-        # Extract from evidence items by role
         for item in bundle.evidence_items:
-            val = item.value if isinstance(item.value, dict) else {}
             role = item.agent_role.value
+            item_val = item.value
+            claim_lower = item.claim.lower() if item.claim else ""
 
+            # ---- Fundamentals: quality = bullish evidence fraction × avg confidence ----
             if role == "fundamentals":
-                # Fundamentals evidence: extract quality signals
-                conf = val.get("confidence", 0.0) if isinstance(val, dict) else 0.0
-                fundamentals.setdefault("profitability", conf)
-                fundamentals.setdefault("balance_sheet", conf)
-            elif role == "valuation":
-                # Valuation evidence: extract upside_pct
-                upside = val.get("upside_pct", val.get("upside", 0.0))
-                valuation.setdefault("upside_pct", float(upside))
-            elif role == "news" or role == "sentiment":
-                # News/sentiment as catalyst proxy
-                conf = val.get("confidence", 0.5) if isinstance(val, dict) else 0.5
-                catalysts.setdefault("clarity", conf)
+                conf = item.confidence if item.confidence else 0.5
+                fundamentals_confidences.append(conf)
+                if item.direction == Direction.BULLISH:
+                    fundamentals_bullish_count += 1
+                elif item.direction == Direction.BEARISH:
+                    fundamentals_bearish_count += 1
 
-        # Pull IV percentile and liquidity from market data context
+            # ---- Valuation: extract upside_pct from claim or value ----
+            elif role == "valuation":
+                # Try claim text: "upside_pct: 0.22" or "upside: 22%"
+                match = re.search(r"upside[_\s]?pct[:\s]+([0-9.]+)", claim_lower)
+                if match:
+                    try:
+                        raw = float(match.group(1))
+                        # Handle both decimal (0.22) and percentage (22.0) formats
+                        valuation_upside = raw if raw <= 1.0 else raw / 100.0
+                    except ValueError:
+                        pass
+                # Try value dict
+                if valuation_upside is None and isinstance(item_val, dict):
+                    for key in ("upside_pct", "upside", "upside_pct_real"):
+                        if key in item_val:
+                            try:
+                                raw = float(item_val[key])
+                                valuation_upside = raw if raw <= 1.0 else raw / 100.0
+                                break
+                            except (ValueError, TypeError):
+                                pass
+                # Try raw_payload (EvidenceStore stores full summary_json under 'summary_json' key)
+                if valuation_upside is None and hasattr(item, "raw_payload") and isinstance(item.raw_payload, dict):
+                    payload = item.raw_payload.get("summary_json", item.raw_payload)
+                    for key in ("upside_pct", "upside", "upside_pct_real"):
+                        if key in payload:
+                            try:
+                                raw = float(payload[key])
+                                valuation_upside = raw if raw <= 1.0 else raw / 100.0
+                                break
+                            except (ValueError, TypeError):
+                                pass
+                if item.confidence:
+                    valuation_confidence = item.confidence
+
+            # ---- News / Sentiment: catalyst clarity proxy ----
+            elif role in ("news", "sentiment"):
+                conf = item.confidence if item.confidence else 0.5
+                catalysts_confidences.append(conf)
+                if item.direction == Direction.BULLISH:
+                    catalysts_bullish_count += 1
+
+        # ---- Compute fundamentals quality ----
+        fundamentals: dict = {}
+        if fundamentals_confidences:
+            avg_conf = sum(fundamentals_confidences) / len(fundamentals_confidences)
+            total = fundamentals_bullish_count + fundamentals_bearish_count
+            if total > 0:
+                # Quality = fraction of bullish evidence × average confidence
+                quality = (fundamentals_bullish_count / total) * avg_conf
+            else:
+                quality = avg_conf * 0.5  # neutral evidence gets half weight
+            fundamentals["profitability"] = quality
+            fundamentals["balance_sheet"] = quality
+
+        # ---- Compute valuation ----
+        valuation: dict = {}
+        if valuation_upside is not None:
+            valuation["upside_pct"] = valuation_upside
+        valuation["_confidence"] = valuation_confidence
+
+        # ---- Compute catalysts ----
+        catalysts: dict = {}
+        if catalysts_confidences:
+            catalysts["clarity"] = sum(catalysts_confidences) / len(catalysts_confidences)
+
+        # ---- Pull IV percentile and liquidity from market data context ----
         market_data = ticker_context.get("market_data", {})
         if isinstance(market_data, dict):
             option_context["iv_percentile"] = float(market_data.get("iv_percentile", 0.5))
@@ -365,6 +470,13 @@ class HermesResearchApp:
             )
             option_ctx = thesis_inputs.get("option_context", {})
             holding_ctx = thesis_inputs.get("holding_context", {})
+            # Phase 14 instrument flags derived from task type:
+            # OPTION_IDEA → user wants option entry (CSP for discounted entry, spread for defined risk)
+            # POSITION_MANAGEMENT → user holds stock and wants income (Covered Call)
+            if task.task_type.value == "option_idea":
+                option_ctx["wants_discounted_entry"] = True
+            if task.task_type.value == "position_management" and holding_ctx.get("has_stock"):
+                option_ctx["short_term_upside_limited"] = True
             instrument_rec = self._instrument_selector.choose(thesis, option_ctx, holding_ctx)
             conviction = "High" if thesis.classification == "Investable" else "Medium"
             decision_card = PositionDecisionCard(
@@ -378,6 +490,56 @@ class HermesResearchApp:
             )
         except Exception as exc:
             errors.append(f"Phase14 thesis/instrument error: {exc}")
+
+        # Phase 15: Options Structure + Early Exit
+        # Runs after Phase 14 instrument selection; only applies to options-based instruments.
+        options_structure: OptionsStructure | None = None
+        early_exit: EarlyExitPlan | None = None
+        if instrument_rec is not None and instrument_rec.primary_action in {
+            "Buy Call", "Bull Call Spread", "Sell Cash-Secured Put", "Covered Call",
+        }:
+            try:
+                # Pull market data for options structure decisions
+                mkt_data = ticker_context.get("market_data", {}) if ticker_context else {}
+                chain = ticker_context.get("option_chain", []) if ticker_context else []
+                current_price = float(mkt_data.get("last_price", 0.0)) or (signal.entry_price if signal else 0.0)
+                target_price = float(signal.take_profit) if signal and signal.take_profit else None
+                iv_pct = float(mkt_data.get("iv_percentile", 0.50))
+
+                # Thesis months from holding horizon or default
+                horizon = signal.holding_horizon if signal else "3M"
+                thesis_months_map = {"1M": 1, "2M": 2, "3M": 3, "6M": 6, "9M": 9, "12M": 12, "18M": 18, "2Y": 24}
+                thesis_months = thesis_months_map.get(horizon.upper(), 6)
+
+                options_structure = self._options_decision_engine.decide(
+                    instrument_action=instrument_rec.primary_action,
+                    current_price=current_price,
+                    target_price=target_price,
+                    thesis_months=thesis_months,
+                    option_chain=chain,
+                    iv_percentile=iv_pct,
+                )
+                options_structure.ticker = ticker
+
+                # Early exit evaluation
+                entry_price = float(signal.entry_price) if signal and signal.entry_price else current_price
+                early_exit = self._early_exit_engine.evaluate(
+                    instrument_action=instrument_rec.primary_action,
+                    thesis_state="Stable",
+                    thesis_state_reason=f"Initial evaluation — {thesis.classification}" if thesis else "Initial",
+                    current_price=current_price,
+                    entry_price=entry_price,
+                    target_price=target_price if target_price else current_price * 1.20,
+                    option_return_pct=0.0,  # No open position yet at initial recommendation
+                    iv_change=0.0,
+                    theta_burn_accelerating=False,
+                    expiry_months=options_structure.primary_contract.expiry_months,
+                    months_remaining=float(options_structure.primary_contract.expiry_months),
+                    iv_percentile=iv_pct,
+                )
+                early_exit.ticker = ticker
+            except Exception as exc:
+                errors.append(f"Phase15 options/early-exit error: {exc}")
 
         # 8. Persist to database — first ensure the task row exists (FK prerequisite)
         if self._pipeline:
@@ -398,8 +560,23 @@ class HermesResearchApp:
                     errors.append(f"Report persist error: {exc}")
 
         # 9. Generate trade plan
+        # Phase 14: when instrument is CSP or Covered Call, override action to match
+        # the Phase 14 instrument selection (not just the generic BUY signal rating).
         trade_plan: dict | None = None
-        if signal is not None:
+        if signal is not None and instrument_rec is not None:
+            try:
+                base_plan = self._trade_plan_generator.generate(signal)
+                # Override action if Phase 14 selected a specific instrument
+                override_action = self._instrument_action_to_trade_plan_action(
+                    instrument_rec.primary_action
+                )
+                if override_action != base_plan.get("action"):
+                    base_plan["action"] = override_action
+                    base_plan["_instrument_override"] = True
+                trade_plan = base_plan
+            except Exception as exc:
+                errors.append(f"TradePlanGenerator error: {exc}")
+        elif signal is not None:
             try:
                 trade_plan = self._trade_plan_generator.generate(signal)
             except Exception as exc:
@@ -430,6 +607,8 @@ class HermesResearchApp:
             thesis=thesis,
             instrument_recommendation=instrument_rec,
             decision_card=decision_card,
+            options_structure=options_structure,
+            early_exit=early_exit,
         )]
 
     def execute_subagent(self, subtask) -> list[EvidenceItem]:

@@ -481,6 +481,112 @@ class PositionDecisionCard:
                 f"conviction must be High, Medium, or Low; got {self.conviction!r}"
             )
 
+
+# ---------------------------------------------------------------------------
+# Phase 15: Options Structure
+# ---------------------------------------------------------------------------
+
+class ExitTrigger(str, Enum):
+    """Trigger classes for early exit decisions."""
+    TARGET_REACHED = "target_reached"
+    RETURN_THRESHOLD = "return_threshold"
+    EFFICIENCY_BREAKDOWN = "efficiency_breakdown"
+    THESIS_BREAK = "thesis_break"
+    STRUCTURE_BREAK = "structure_break"
+    PRICE_RISK_DISCIPLINE = "price_risk_discipline"
+
+
+@dataclass
+class ExitZone:
+    """
+    One zone in the exit plan (first trim / main profit / full exit).
+    """
+    zone_name: str          # "first_trim" | "main_profit" | "full_exit"
+    action: str            # "Trim" | "Take Profit" | "Consider Exit" | "No Action"
+    target_return_pct: float | None  # e.g. 0.30 for 30%
+    trigger_condition: str  # Human-readable trigger description
+
+
+@dataclass
+class EarlyExitPlan:
+    """
+    Phase 15: Early exit planning for an options position.
+
+    Three-zone model from spec:
+    - first_trim_zone: first opportunity to lock in partial gains
+    - main_profit_zone: primary profit-taking window
+    - full_exit_zone: full position exit
+    """
+    ticker: str
+    primary_exit_trigger: ExitTrigger
+    severity: str          # "Critical" | "High" | "Medium" | "Low" | "None"
+    primary_reason: str
+    first_trim: ExitZone
+    main_profit: ExitZone
+    full_exit: ExitZone
+
+    def __post_init__(self):
+        if self.severity not in {"Critical", "High", "Medium", "Low", "None"}:
+            raise ValueError(f"severity must be one of Critical/High/Medium/Low/None; got {self.severity!r}")
+
+
+@dataclass
+class OptionContract:
+    """
+    Phase 15: A single option contract specification.
+    """
+    expiry_months: int
+    strike: float
+    option_type: str   # "call" or "put"
+    delta_estimate: float | None = None
+    position_type: str = "long"  # "long" or "short"
+    # Multi-leg support: short leg for spreads, CSP assignment, covered call
+    short_contract: "OptionContract | None" = None  # the paired short leg (spread/CSP/covered)
+    net_debit: float | None = None   # net cost to open (for spreads)
+    net_credit: float | None = None  # net premium received (for spreads/CSP/covered call)
+    assignment_strike: float | None = None  # CSP/covered call assignment price
+    covered_by_shares: bool = False  # True for covered call (already holding shares)
+
+    def __post_init__(self):
+        if self.option_type not in {"call", "put"}:
+            raise ValueError(f"option_type must be 'call' or 'put'; got {self.option_type!r}")
+        if self.short_contract is not None:
+            if not isinstance(self.short_contract, OptionContract):
+                raise ValueError("short_contract must be an OptionContract instance")
+
+
+@dataclass
+class OptionsStructure:
+    """
+    Phase 15: Structured options details for the selected instrument.
+
+    Produced by OptionsDecisionEngine after InstrumentSelectionEngine has
+    chosen an options-based expression (Buy Call, Bull Call Spread, CSP).
+    For spreads/CSP/covered call, primary_contract.short_contract holds the paired leg.
+    """
+    ticker: str
+    instrument_action: str          # e.g. "Buy Call", "Bull Call Spread"
+    primary_contract: OptionContract  # The recommended contract; short_contract holds paired leg for spreads
+    conservative_alternative: str | None  # Label e.g. "Buy Stock", "Buy ATM Call"
+    higher_upside_alternative: str | None  # Label e.g. "Buy OTM Call"
+    target_path_summary: str         # Human-readable target/return mapping
+    early_exit_summary: str          # Summary of exit zones
+    # Strategy-specific structured fields (eliminate parsing from text)
+    strategy_net_debit: float | None = None   # Net cost to open position (spread/buy call)
+    strategy_net_credit: float | None = None  # Net premium received (CSP/covered call)
+    assignment_strike: float | None = None   # Strike at which underlying would be assigned (CSP/covered)
+    covered_by_shares: bool = False           # True if covered call (shares already held)
+    break_even_price: float | None = None
+    max_profit_pct: float | None = None
+    max_loss_pct: float | None = None
+
+    def __post_init__(self):
+        if not self.instrument_action:
+            raise ValueError("instrument_action is required")
+        if self.primary_contract.option_type not in {"call", "put"}:
+            raise ValueError(f"option_type must be call or put; got {self.primary_contract.option_type!r}")
+
+
 def new_research_task(
     request_text: str,
     tickers: list[str],
