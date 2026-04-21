@@ -51,6 +51,14 @@ from agent.research_v1.contracts import (
 from agent.research_v1.signal_pipeline import SignalPersistencePipeline
 from agent.research_v1.trade_plan import TradePlanGenerator
 from agent.research_v1.market_data_service import MarketDataService
+from agent.research_v1.thesis_engine import ThesisEngine
+from agent.research_v1.instrument_selection import InstrumentSelectionEngine
+from agent.research_v1.contracts import (
+    UnderlyingThesis,
+    InstrumentRecommendation,
+    PositionDecisionCard,
+    VALID_BULLISH_ACTIONS,
+)
 
 
 @dataclass
@@ -60,7 +68,8 @@ class TickerResearchResult:
 
     When a multi-ticker request is made (e.g. "Compare AAPL and MSFT"),
     run() returns one TickerResearchResult per ticker, each with its own
-    signal, report, review, and trade_plan correctly scoped to that ticker.
+    signal, report, review, trade_plan, and Phase 14 decision card correctly
+    scoped to that ticker.
     """
     task: ResearchTask
     ticker: str                        # Which ticker this result is for
@@ -70,6 +79,10 @@ class TickerResearchResult:
     trade_plan: dict | None
     audit: dict[str, Any]
     errors: list[str]
+    # Phase 14: bullish decision fields
+    thesis: UnderlyingThesis | None = None
+    instrument_recommendation: InstrumentRecommendation | None = None
+    decision_card: PositionDecisionCard | None = None
 
 
 @dataclass
@@ -124,6 +137,9 @@ class HermesResearchApp:
         self._evidence_store = EvidenceStore()
         self._pipeline = SignalPersistencePipeline(database=database) if database else None
         self._trade_plan_generator = TradePlanGenerator()
+        # Phase 14: bullish decision engines
+        self._thesis_engine = ThesisEngine()
+        self._instrument_selector = InstrumentSelectionEngine()
 
     def run(self, request: str) -> ResearchResult:
         """
@@ -206,6 +222,64 @@ class HermesResearchApp:
             errors=global_errors,
         )
 
+    def _extract_thesis_inputs(
+        self,
+        bundle: EvidenceBundle,
+        ticker_context: dict[str, Any],
+    ) -> dict:
+        """
+        Extract inputs for ThesisEngine from evidence bundle and market context.
+
+        Phase 14: pulls quality, valuation, and catalyst signals from the evidence
+        items produced by the subagents. This is additive — it does not modify the
+        canonical signal/report produced by FinalJudge.
+        """
+        fundamentals: dict = {}
+        valuation: dict = {}
+        catalysts: dict = {}
+        option_context: dict = {}
+        holding_context: dict = {"has_stock": False}
+
+        # Extract from evidence items by role
+        for item in bundle.evidence_items:
+            val = item.value if isinstance(item.value, dict) else {}
+            role = item.agent_role.value
+
+            if role == "fundamentals":
+                # Fundamentals evidence: extract quality signals
+                conf = val.get("confidence", 0.0) if isinstance(val, dict) else 0.0
+                fundamentals.setdefault("profitability", conf)
+                fundamentals.setdefault("balance_sheet", conf)
+            elif role == "valuation":
+                # Valuation evidence: extract upside_pct
+                upside = val.get("upside_pct", val.get("upside", 0.0))
+                valuation.setdefault("upside_pct", float(upside))
+            elif role == "news" or role == "sentiment":
+                # News/sentiment as catalyst proxy
+                conf = val.get("confidence", 0.5) if isinstance(val, dict) else 0.5
+                catalysts.setdefault("clarity", conf)
+
+        # Pull IV percentile and liquidity from market data context
+        market_data = ticker_context.get("market_data", {})
+        if isinstance(market_data, dict):
+            option_context["iv_percentile"] = float(market_data.get("iv_percentile", 0.5))
+            option_context["liquidity_ok"] = market_data.get("liquidity_ok", True)
+
+        # Pull from bundle.context_snapshot if available (Phase 14+ extended context)
+        ctx_snapshot = bundle.context_snapshot
+        if isinstance(ctx_snapshot, dict):
+            option_context.setdefault("iv_percentile", ctx_snapshot.get("iv_percentile", 0.5))
+            option_context.setdefault("liquidity_ok", ctx_snapshot.get("liquidity_ok", True))
+            holding_context = ctx_snapshot.get("holding_context", holding_context)
+
+        return {
+            "fundamentals": fundamentals,
+            "valuation": valuation,
+            "catalysts": catalysts,
+            "option_context": option_context,
+            "holding_context": holding_context,
+        }
+
     def _run_ticker_pipeline(
         self,
         task: ResearchTask,
@@ -275,6 +349,36 @@ class HermesResearchApp:
         except Exception as exc:
             errors.append(f"FinalJudge error: {exc}")
 
+        # Phase 14: Underlying Thesis + Instrument Selection
+        # Runs after FinalJudge to stay additive to the canonical pipeline.
+        thesis: UnderlyingThesis | None = None
+        instrument_rec: InstrumentRecommendation | None = None
+        decision_card: PositionDecisionCard | None = None
+        try:
+            thesis_inputs = self._extract_thesis_inputs(bundle, ticker_context)
+            thesis = self._thesis_engine.evaluate(
+                ticker=ticker,
+                fundamentals=thesis_inputs.get("fundamentals", {}),
+                valuation=thesis_inputs.get("valuation", {}),
+                catalysts=thesis_inputs.get("catalysts", {}),
+                task_id=task.task_id,
+            )
+            option_ctx = thesis_inputs.get("option_context", {})
+            holding_ctx = thesis_inputs.get("holding_context", {})
+            instrument_rec = self._instrument_selector.choose(thesis, option_ctx, holding_ctx)
+            conviction = "High" if thesis.classification == "Investable" else "Medium"
+            decision_card = PositionDecisionCard(
+                task_id=task.task_id,
+                ticker=ticker,
+                primary_action=instrument_rec.primary_action,
+                conviction=conviction,
+                thesis_summary=thesis.summary,
+                why_now=f"Thesis: {thesis.classification}; instrument: {instrument_rec.primary_action}",
+                alternatives=instrument_rec.ranked_alternatives,
+            )
+        except Exception as exc:
+            errors.append(f"Phase14 thesis/instrument error: {exc}")
+
         # 8. Persist to database — first ensure the task row exists (FK prerequisite)
         if self._pipeline:
             try:
@@ -323,6 +427,9 @@ class HermesResearchApp:
             trade_plan=trade_plan,
             audit=audit,
             errors=result_errors,
+            thesis=thesis,
+            instrument_recommendation=instrument_rec,
+            decision_card=decision_card,
         )]
 
     def execute_subagent(self, subtask) -> list[EvidenceItem]:

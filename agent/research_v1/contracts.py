@@ -378,6 +378,109 @@ class CanonicalReview:
 
 # Convenience factory functions
 
+# Allowed bullish-only actions for Phase 14 instrument selection
+VALID_BULLISH_ACTIONS = frozenset([
+    "Buy Stock",
+    "Buy Call",
+    "Bull Call Spread",
+    "Sell Cash-Secured Put",
+    "Covered Call",
+    "Watchlist",
+    "No Trade",
+])
+
+
+@dataclass
+class UnderlyingThesis:
+    """
+    Phase 14: Stock-thesis evaluation — determines whether a stock is worth owning.
+
+    This is the first step in the bullish decision flow: evaluate the underlying
+    before any derivative instrument selection.
+
+    Classifications:
+        - Investable: strong quality + credible upside + reasonable path
+        - Watchlist: positive thesis but weak timing / weak current upside
+        - No Trade: low quality or broken economics
+    """
+    task_id: str
+    ticker: str
+    quality_score: float          # 0.0–1.0: business quality, earnings quality, balance sheet
+    valuation_score: float        # 0.0–1.0: implied upside vs current price
+    catalyst_score: float          # 0.0–1.0: identified drivers, visibility and timing confidence
+    thesis_risk_score: float     # 0.0–1.0: what can break the thesis
+    classification: str           # "Investable" | "Watchlist" | "No Trade"
+    summary: str                  # Human-readable one-line thesis summary
+
+    def __post_init__(self):
+        if self.classification not in {"Investable", "Watchlist", "No Trade"}:
+            raise ValueError(
+                f"classification must be Investable, Watchlist, or No Trade; got {self.classification!r}"
+            )
+        if not 0.0 <= self.quality_score <= 1.0:
+            raise ValueError("quality_score must be between 0.0 and 1.0")
+        if not 0.0 <= self.valuation_score <= 1.0:
+            raise ValueError("valuation_score must be between 0.0 and 1.0")
+        if not 0.0 <= self.catalyst_score <= 1.0:
+            raise ValueError("catalyst_score must be between 0.0 and 1.0")
+
+
+@dataclass
+class InstrumentRecommendation:
+    """
+    Phase 14: Instrument selection — selects the best bullish expression of a stock thesis.
+
+    After UnderlyingThesis classifies a stock as Investable, this recommends the
+    best way to express that bullish view (stock vs. call vs. spread vs. sell put).
+
+    The primary_action must be one of the VALID_BULLISH_ACTIONS.
+    """
+    task_id: str
+    ticker: str
+    primary_action: str           # One of VALID_BULLISH_ACTIONS
+    ranked_alternatives: list[str]  # Other valid instruments, in preference order
+    reason: str                   # Why this instrument was chosen
+
+    def __post_init__(self):
+        if not self.primary_action:
+            raise ValueError("primary_action is required")
+        if self.primary_action not in VALID_BULLISH_ACTIONS:
+            raise ValueError(
+                f"primary_action must be one of {sorted(VALID_BULLISH_ACTIONS)}; "
+                f"got {self.primary_action!r}"
+            )
+
+
+@dataclass
+class PositionDecisionCard:
+    """
+    Phase 14: Boss-facing decision artifact — the primary output of the bullish
+    decision flow.
+
+    Combines the underlying thesis evaluation and instrument selection into a
+    single coherent decision card that can be rendered in the viewer and PDF.
+    """
+    task_id: str
+    ticker: str
+    primary_action: str            # Must be a VALID_BULLISH_ACTIONS
+    conviction: str               # "High" | "Medium" | "Low"
+    thesis_summary: str           # Why the stock is worth owning
+    why_now: str                  # Why this decision at this time
+    alternatives: list[str]        # Why rejected alternatives were rejected
+
+    def __post_init__(self):
+        if not self.primary_action:
+            raise ValueError("primary_action is required")
+        if self.primary_action not in VALID_BULLISH_ACTIONS:
+            raise ValueError(
+                f"primary_action must be one of {sorted(VALID_BULLISH_ACTIONS)}; "
+                f"got {self.primary_action!r}"
+            )
+        if self.conviction not in {"High", "Medium", "Low"}:
+            raise ValueError(
+                f"conviction must be High, Medium, or Low; got {self.conviction!r}"
+            )
+
 def new_research_task(
     request_text: str,
     tickers: list[str],

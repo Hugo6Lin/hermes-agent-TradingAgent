@@ -20,6 +20,10 @@ pipeline from natural language request to canonical signal, report, review, and 
 - **`reviewer.py`** — optional `CanonicalReview` quality gate
 - **`signal_pipeline.py`** — `SignalPersistencePipeline` for DB persistence
 
+### Bullish Decision (Phase 14)
+- **`thesis_engine.py`** — `ThesisEngine` evaluates stock quality, valuation, catalysts → `UnderlyingThesis` (Investable / Watchlist / No Trade)
+- **`instrument_selection.py`** — `InstrumentSelectionEngine` selects best bullish expression → `InstrumentRecommendation` (Buy Stock / Buy Call / Bull Call Spread / Sell CSP / Covered Call / No Trade)
+
 ### Market Data (Phase 12)
 - **`market_data_service.py`** — `MarketDataService` fetches Futu-first market context
 - **`data/providers.py`** — `MarketDataProvider` ABC + `FutuMarketDataProvider` / `YahooMarketDataProvider` / `FallbackMarketDataProvider`
@@ -78,7 +82,9 @@ HermesResearchApp.run(request)
   ├─ SignalPersistencePipeline.persist_canonical_signal() + .persist_canonical_report()
   ├─ TradePlanGenerator.generate() → trade_plan dict
   ├─ Reviewer.review() [optional] → CanonicalReview
-  └─ _run_ticker_pipeline() → TickerResearchResult {signal, report, review, trade_plan, audit}
+  ├─ Phase 14: ThesisEngine.evaluate() → UnderlyingThesis [additive]
+  ├─ Phase 14: InstrumentSelectionEngine.choose() → InstrumentRecommendation [additive]
+  └─ _run_ticker_pipeline() → TickerResearchResult {signal, report, review, trade_plan, audit, thesis, instrument_recommendation, decision_card}
 ```
 
 ## How It Relates to Other Directories

@@ -23,6 +23,7 @@ TaskRouter → Orchestrator → SubagentExecutor → EvidenceStore → FinalJudg
 - Add new `AgentRole` enum values in `contracts.py`
 - Extend `FallbackMarketDataProvider` with new fallback strategies
 - Add new viewer routes in `viewer.py` and corresponding tests in `test_p6_viewer.py`
+- Add Phase 14 decision engines as new modules (not in existing canonical files)
 
 ## Key Interfaces
 
@@ -71,7 +72,7 @@ class FallbackMarketDataProvider:
 | If you change | You MUST also check |
 |---|---|
 | `contracts.py` | All consumers — dataclass fields are used everywhere |
-| `app.py` | `test_app_integration.py`, `test_phase13_acceptance.py` |
+| `app.py` | `test_app_integration.py`, `test_phase13_acceptance.py`, `test_bullish_decision_integration.py` |
 | `subagent_executor.py` | `test_market_data_service.py`, analyst files |
 | `market_data_service.py` | `test_market_data_service.py`, `subagent_executor.py` |
 | `data/providers.py` | `test_market_data_service.py`, `test_futu_provider.py` |
@@ -80,6 +81,8 @@ class FallbackMarketDataProvider:
 | `viewer.py` | `test_p6_viewer.py`, `test_phase13_acceptance.py` |
 | `report_pdf.py` | `test_phase13_acceptance.py` |
 | `batch_cli.py` | `test_batch_cli.py`, `test_phase13_acceptance.py` |
+| `thesis_engine.py` | `test_thesis_engine.py`, `test_bullish_decision_integration.py` |
+| `instrument_selection.py` | `test_instrument_selection.py`, `test_bullish_decision_integration.py` |
 
 ## Legacy Files (Frozen)
 
