@@ -1,307 +1,796 @@
-# Hermes 报告界面设计规范
+# Hermes 报告界面设计规范（Clean）
 
-**日期：** 2026-04-22
-**阶段：** 报告界面设计
-**状态：** 初稿
-
----
-
-## 一、目的
-
-Hermes 报告界面是 boss 做出投资决策的最终产物表面。它将完整的牛市决策流程转化为两种输出模式。第一种是海报视图，这是一张单页决策看板，优先保证 3 秒内理解完整决策内容，同时支持直接打印在单张 A4 或 Letter 纸上。第二种是 PDF 报告视图，这是一份多页 executive 报告，优先保证存档可查和投委会分发阅读。
-
-本界面不替代幻灯片，因为幻灯片暗示演示节奏、内容密度不可控、打印效果差、不适合存档。海报加 PDF 的组合既给了 boss 一张无需导航的决策卡，也给了投委会一份可分页存档的完整记录。
+**日期：** 2026-04-22  
+**阶段：** 报告界面重设计  
+**状态：** 可实施版本
 
 ---
 
-## 二、目标读者
+## 一、目标
 
-主要读者是 boss 或投委会主任，这两类人仅需要阅读海报即可做出判断。次要读者是操作员或分析师，这类人可以在需要时阅读完整的 PDF 报告以了解背后的研究深度。
+### 1.1 这份规范解决什么问题
 
-boss 在 3 秒内必须看清：操作是什么（六个合法操作之一）、信心度是高还是中还是低、标的是哪只股票、目标价和目标窗口是什么、为何现在必须行动的最核心原因。
+Hermes 现有报告输出更像技术导出页，而不是老板可直接阅读的决策简报。  
+本规范定义一套新的报告界面系统，用于把 Hermes 已有的 bullish decision pipeline 结果，整理成：
 
-boss 在 30 秒内可以看清：为何选择这个工具而非其他备选、期权结构是什么（如有）、早期退出计划是什么、主要风险是什么、当前监控状态和验证结论是什么。
+1. 单页 Boss Poster
+2. 可打印 PDF 报告
+3. 后续可复用的固定 Web UI 模板
 
-超过 60 秒才能理解的内容不在本表面范围，深度研究应归属分析师级视图。
+这套界面的目标不是展示“系统做了什么”，而是帮助老板快速回答：
+
+- 现在该不该做
+- 该做什么
+- 为什么现在做
+- 风险在哪里
+- 如果做了，后续怎么观察和处理
+
+### 1.2 面向谁
+
+主要读者：
+
+- 老板
+- 投资委员会
+- 负责执行和跟踪的操作人员
+
+次要读者：
+
+- 分析师
+- 维护 Hermes 的开发者
+
+### 1.3 为什么是 Poster + PDF，不是 PPT
+
+PPT 不适合这个场景，原因如下：
+
+- PPT 默认是演示逻辑，不是决策逻辑
+- PPT 容易把内容切碎到很多页，降低“一眼看清”的能力
+- PPT 打印效果不稳定
+- PPT 不适合做标准化、批量化、自动化导出
+
+Poster + PDF 更适合 Hermes：
+
+- Poster 负责 3 秒钟决策理解
+- PDF 负责 30 到 60 秒深读
+- 两者都适合浏览器打印和归档
+- 两者都能稳定模板化和自动生成
+
+---
+
+## 二、产品边界
+
+### 2.1 这不是新交易逻辑
+
+本规范只定义报告界面和信息呈现，不新增：
+
+- 新的交易信号算法
+- 新的 thesis 评分逻辑
+- 新的 validation 评分逻辑
+- 新的做空能力
+- 自动交易
+- 自动平仓
+
+### 2.2 必须遵守的 Hermes 边界
+
+报告界面必须完整继承 Hermes 已批准的边界：
+
+- bullish-only
+- alert-only
+- equity thesis first
+- options are derivative expression of equity thesis
+
+### 2.3 正式动作集合
+
+界面允许出现且必须被正确呈现的动作只有：
+
+- 买入股票 / Buy Stock
+- 买入看涨 / Buy Call
+- 牛市看涨价差 / Bull Call Spread
+- 卖出备兑看跌 / Sell Cash-Secured Put
+- 备兑看涨 / Covered Call
+- 观望 / Watchlist
+- 不交易 / No Trade
+
+界面不得退化为通用：
+
+- BUY
+- HOLD
+- SELL
+
+这些旧式词汇只能在遗留字段里作为兼容数据出现，不能成为主界面语言。
 
 ---
 
 ## 三、设计原则
 
-### 3.1 决策优先的信息层级
+### 3.1 决策优先
 
-信息按重要性排序，依次为：操作加信心度（最主导）、代码加公司名、目标价加目标窗口、为何此时（前三条）、KPI 快照（当前价、市盈率、EPS 增长、分析师评级）、投资逻辑加催化剂、技术面摘要、工具选择（首选保守备选）、期权结构（如适用）、早期退出区间（如适用）、风险标签、监控状态、验证摘要。
+页面第一眼必须先给出结论，而不是先给数据。
 
-### 3.2 中文优先的双语规则
+优先级顺序如下：
 
-所有区块标签以中文为主文本，英文作为次要标签写在同一元素上，格式统一为中文斜杠 English。主视图中不存在英文单独成行的情况。无乱码，所有字符串统一在 strings_zh.py 和 strings_en.py 中定义。
+1. 核心动作
+2. 信心度
+3. 标的代码与公司名
+4. 目标价与时间窗
+5. 为什么现在
+6. 工具选择
+7. 风险
+8. 观察与验证
 
-### 3.3 可打印的 Executive 摘要风格
+### 3.2 中文优先，英文辅助
 
-海报和 PDF 均支持标准浏览器打印，颜色通过 print-color-adjust exact 保持不丢失，文字不超出页面边界，海报可完整打印在单页，PDF 使用 page-break 规则实现正确分页。
+所有主标签采用：
 
-### 3.4 优质机构风格
+`中文 / English`
 
-不使用剪贴画、卡通或轻浮插图。布局采用清晰网格，区块之间边界分明。颜色语义固定：橙红色代表操作或警示，青绿色代表信心或支撑，深红色仅用于风险标签。正文采用清晰无衬线字体，通过字号差异建立层级。无任何原始数据无格式转储，所有数字均有对应标签。
+规则：
 
-### 3.5 紧凑监控支持
+- 中文是主标题
+- 英文是辅助说明
+- 中文字号更大
+- 英文字重更轻
+- 不允许英文主导
 
-海报页脚（底部区块）概览监控状态和验证结论，一目了然。PDF 末页提供完整的监控列表和验证表格。条目数量较多时仍然可读。
+### 3.3 老板可读
 
-### 3.6 无数据库转储感
+页面要像“决策简报”，不是“技术输出页”。
 
-每个表格行均有有意义的标签。空字段显示破折号而非空白。日期使用 YYYY-MM-DD 格式。百分比使用 XX% 格式。
+具体要求：
 
----
+- 少表格堆砌
+- 少技术缩写堆砌
+- 少原始指标罗列
+- 多卡片、多短句、多明确标签
 
-## 四、海报结构
+### 3.4 可打印
 
-海报为单张 A4 或 Letter 纸，分成三个垂直堆叠的视觉区块。
+页面从设计开始就要考虑：
 
-### 区块一 — 决策主角（顶部约百分之五十五）
+- A4 / Letter 打印
+- page-break 行为
+- 卡片不跨页断裂
+- 表头与首行不分离
 
-这个区块包含 boss 做 3 秒决策所需的全部信息，分为五个部分。
+### 3.5 稳定模板化
 
-第一部分为操作区块，位于左侧主导位置。区块标签为操作 / Action，大号中文操作文字例如买入看涨，小号英文操作文字例如 Buy Call，下方附信心徽章如高信心 / HIGH CONVICTION。
+该界面必须适合：
 
-第二部分为代码区块，位于右侧顶部。大号代码符号例如 NVDA，下方附公司名以小号文字呈现。
-
-第三部分为目标加仓位区块，位于右侧中部。包括目标窗口 / Target Window 如 12个月，目标价 / Target Price 如 180 美元到 250 美元，建议仓位 / Suggested Size 如 15% Portfolio。
-
-第四部分为为何此时，位于右侧中下。区块标签为为何此时 / Why Now，最多 3 条编号要点，每条含中文主文字加英文次要文字。
-
-第五部分为风险标签行，位于区块一底部、全宽。水平排列风险标签，每个含中文主文字加英文次要文字，背景为半透明深红色。
-
-### 区块二 — 详情卡片（中层约百分之三十五）
-
-这个区块包含 30 秒深度阅读所需的分析内容，分五个部分。
-
-第一部分为 KPI 卡片，4 列网格排列，分别是当前价 / Price、市盈率 / P/E、EPS增长 / EPS Growth、分析师评级 / Analyst Rating。
-
-第二部分为投资逻辑加技术面，采用 2 列布局。左列为投资逻辑 / Thesis and Catalysts，最多 4 条编号要点。右列为技术分析 / Technical Analysis，展示支撑位、阻力位、趋势摘要。
-
-第三部分为工具选择，5 列水平排列，每个格子显示一种工具类型。角色标签分别为首选 / PRIMARY、保守方案 / CONSERVATIVE、备选方案 / ALTERNATIVE，已拒绝的工具不显示。最多展示 3 种工具（首选加保守加备选）。
-
-第四部分为期权结构，单个紧凑卡片，仅在实际为期权工具时显示。包含 5 列字段：到期日 / Expiry、行权价 / Strike、盈亏平衡 / Break-Even、Delta / Delta、提前退出 / Early Exit。
-
-第五部分为早期退出，EarlyExitPlan 存在时显示。分为三个区间：首轮减仓 / First Trim、主要利润 / Main Profit、完全退出 / Full Exit。每个区间含操作加触发条件加目标收益率。
-
-### 区块三 — 状态页脚（底部约百分之十）
-
-这个区块包含监控上下文，轻量但始终可见，分三个部分。
-
-第一部分为监控状态，位于左侧。状态徽章分别为持仓中 / Held、重点关注 / High Priority、研究进行中 / Research、被动跟踪 / Passive，另附操作倾向 / Action Bias 标签和对应值。
-
-第二部分为验证摘要，位于中间。市场状态 / Regime 如趋势向上 / Trend Up，验证信心 / Validation Confidence 如 78%，颜色编码高等于青绿色、中等于橙红色。
-
-第三部分为品牌加时间戳，位于右侧。显示 Hermes 研究台 / Hermes Research Desk、决策看板 / Decision Board，以及生成时间戳 YYYY-MM-DD HH:MM。
+- 用固定 HTML/CSS 模板实现
+- 用固定数据映射自动填充
+- 长期维护而不依赖人工排版
 
 ---
 
-## 五、PDF 报告结构
+## 四、信息层级
 
-PDF 报告为多页文档。
+### 4.1 老板 3 秒内必须看到
 
-### 第 1 页 — 批次总览
+- 这只票的核心动作
+- 这笔决策的信心度
+- 建议仓位或动作倾向
+- 目标价和时间窗
+- 一句最核心的“为什么现在”
 
-报告页眉为批次总览 / Batch Overview，附日期和数量。然后是批次总览表格，含列：优先级、代码、公司、评级、信心度百分比、操作倾向、目标价。表格下方为执行摘要文本块。
+### 4.2 30 到 60 秒可读层
 
-### 第 2 页起 — 单个公司报告（每代码一页）
+- Why Now 详细要点
+- Thesis 与催化剂
+- 技术面摘要
+- 工具选择逻辑
+- 期权结构
+- 提前退出计划
+- 监控状态
+- 验证摘要
 
-每个公司报告页面以决策对象为主结构，不以旧版交易计划为主结构。页面顺序严格固定如下。
+### 4.3 深层内容不放在首页
 
-第一区块为决策卡片摘要，这是页眉区块。内容依次为：代码加公司名（主导）、操作（大号中文主操作文字加英文，例如买入看涨 / Buy Call）、信心徽章（高信心 / HIGH CONVICTION）、核心结论框（深色背景，一行结论文字）。
+以下内容不应抢首页版面：
 
-第二区块为工具选择详情，这是首个主体区块。依次展示：首选 / PRIMARY（工具名称和理由）、保守方案 / CONSERVATIVE（工具名称和理由）、备选方案 / ALTERNATIVE（工具名称和理由），并附说明阐明为何首选该工具、保守方案作为备选的理由、以及其他方案被拒绝的原因。
+- 大段研究原文
+- 多行 trade plan 原始字段
+- 冗长表格
+- 过多指标值
 
-第三区块为期权结构详情，仅在工具为期权时显示。内容依次为期权类型 / Instrument（如牛市看涨价差 / Bull Call Spread）、标的合约 / Primary Contract（到期月、行权价、期权类型）、配对合约 / Short Contract（如适用，用于价差或备兑场景，到期月和行权价）、净 debit 或净 credit、盈亏平衡价 / Break-Even、最大盈利百分比 / Max Profit、最大亏损百分比 / Max Loss、Delta 估值、以及提前退出摘要（EarlyExitPlan 的三个区间）。
-
-第四区块为支撑数据网格，这是旧 signal 和 report 字段的参考区域，不作为页面主结构。内容依次为：入场价 / Entry Price（来自 signal.entry_price）、止损价 / Stop Loss（来自 signal.stop_loss）、目标价 / Target Price（来自 signal.take_profit）、持仓周期 / Holding Horizon（来自 signal.holding_horizon）。这些字段作为支撑指标参考，不可作为页面主标题。
-
-第五区块为看多逻辑，来自 decision_card.thesis_summary 和 bull_case，以编号要点形式呈现，最多 4 条。
-
-第六区块为风险观察，来自 report.risk_watch，以列表形式呈现。
-
-### 末页 — 监控列表加验证
-
-报告页眉为监控状态 / Watchlist and 验证摘要 / Validation Summary。监控列表表格含列：代码、操作倾向、状态、逻辑状态、预警级别。验证表格含列：代码、市场状态、历史支持、环境匹配、主要失效模式、信心度。
-
----
-
-## 六、数据映射
-
-### decision_card（PositionDecisionCard）
-
-primary_action 映射到海报区块一操作区块和 PDF 公司页决策卡片摘要。conviction 映射到海报区块一信心徽章。thesis_summary 映射到海报区块二投资逻辑和 PDF 公司页看多逻辑。why_now 映射到海报区块一为何此时要点。alternatives 映射到海报区块二工具选择已拒绝列。
-
-### instrument_recommendation（InstrumentRecommendation）
-
-primary_action 映射到海报区块二工具选择首选格子和 PDF 公司页工具选择首选。ranked_alternatives 映射到海报区块二工具选择保守方案和备选方案格子以及 PDF 公司页对应项。reason 映射到工具格子内理由文字和 PDF 公司页工具理由说明。
-
-### options_structure（OptionsStructure）
-
-instrument_action 映射到海报区块二期权结构卡片标签和 PDF 公司页期权类型。primary_contract.expiry_months 映射到海报区块二期权结构到期日和 PDF 公司页标的合约到期月。primary_contract.strike 映射到海报区块二期权结构行权价和 PDF 公司页标的合约行权价。primary_contract.option_type 映射到 PDF 公司页标的合约期权类型。short_contract（配对空头合约）映射到 PDF 公司页配对合约，用于价差或备兑场景。strategy_net_debit 映射到 PDF 公司页净 debit。strategy_net_credit 映射到 PDF 公司页净 credit。break_even_price 映射到海报区块二期权结构盈亏平衡和 PDF 公司页盈亏平衡价。max_profit_pct 映射到 PDF 公司页最大盈利百分比。max_loss_pct 映射到 PDF 公司页最大亏损百分比。primary_contract.delta_estimate 映射到海报区块二期权结构 Delta。early_exit_summary 映射到海报区块二期权结构提前退出。covered_by_shares 映射到 PDF 公司页备注，用于备兑看涨场景。assignment_strike 映射到 PDF 公司页配对行权价，用于备兑看涨场景。
-
-### early_exit_plan（EarlyExitPlan）
-
-primary_exit_trigger 映射到海报区块二早期退出区块和 PDF 公司页提前退出摘要。severity 映射到海报区块二早期退出严重性标签。primary_reason 映射到海报区块二早期退出理由文字。first_trim（含 zone_name、action、target_return_pct、trigger_condition）映射到海报区块二早期退出首轮减仓区间和 PDF 公司页三个区间。main_profit（含 zone_name、action、target_return_pct、trigger_condition）映射到海报区块二早期退出主要利润区间和 PDF 公司页三个区间。full_exit（含 zone_name、action、target_return_pct、trigger_condition）映射到海报区块二早期退出完全退出区间和 PDF 公司页三个区间。
-
-### watchlist_entry（WatchlistEntry）
-
-ticker 映射到海报区块三监控状态和 PDF 末页。status 映射到海报区块三状态徽章。thesis_state 映射到海报区块三逻辑状态标签和 PDF 末页。alert_level 映射到海报区块三预警标签和 PDF 末页。current_action_bias 映射到海报区块三操作倾向标签。
-
-### validation（ValidationResult）
-
-regime 映射到海报区块三验证区块市场状态和 PDF 末页。validation_confidence 映射到海报区块三验证区块信心度百分比和 PDF 末页。historical_support 映射到 PDF 末页验证表格。environment_fit 映射到 PDF 末页验证表格。main_failure_mode 映射到 PDF 末页验证表格。
-
-### Legacy 支撑字段（仅作支撑数据，不可作为页面主结构）
-
-signal.ticker 用于所有页面标识公司。signal.entry_price 作为支撑数据网格入场价。signal.stop_loss 作为支撑数据网格止损价。signal.take_profit 作为支撑数据网格目标价。signal.holding_horizon 作为支撑数据网格持仓周期。report.company_name 用于所有页面显示公司全称。report.executive_summary 用于 PDF 第 1 页执行摘要文本块。
+这些可作为 PDF 深层内容或附录。
 
 ---
 
-## 七、双语规则
+## 五、Poster 结构
 
-### 中文优先，英文为辅
+Poster 是单页、竖版、打印友好的决策板。
 
-所有标签格式统一为中文斜杠 English。示例标签包括：操作 / Action、为何此时 / Why Now、核心结论 / Bottom Line、看多逻辑 / Bull Case、风险观察 / Risk Watch、期权结构 / Options Structure、提前退出 / Early Exit、监控状态 / Watchlist、验证摘要 / Validation。
+建议比例：
 
-### 术语一致性
+- 顶部：55%
+- 中部：35%
+- 底部：10%
 
-术语表固定，全系统统一，不可出现同义词或不同译法。
+### 5.1 顶部区：决策主区
 
-操作类：买入股票 / Buy Stock、买入看涨 / Buy Call、牛市看涨价差 / Bull Call Spread、卖出备兑看跌 / Sell Cash-Secured Put、备兑看涨 / Covered Call、观望 / Watchlist、不交易 / No Trade。
+目标：3 秒钟读懂。
 
-信心度类：高信心 / HIGH CONVICTION、中信心 / MEDIUM CONVICTION、低信心 / LOW CONVICTION。
+包含：
 
-工具角色类：首选 / PRIMARY、保守方案 / CONSERVATIVE、备选方案 / ALTERNATIVE。
+1. 核心动作
+2. 信心徽章
+3. 标的代码
+4. 公司名称
+5. 目标价
+6. 目标时间窗
+7. 建议仓位或动作倾向
+8. Why Now 三条
+9. 风险标签
 
-监控状态类：持仓中 / Held、重点关注 / High Priority、研究进行中 / Research In Progress、被动跟踪 / Passive Watch。
+#### 动作主区
 
-逻辑状态类：逻辑强化 / Strengthening、逻辑稳定 / Stable、逻辑弱化 / Weakening、逻辑破坏 / Broken。
+必须是页面最大视觉元素。
 
-市场状态类：趋势向上 / Trend Up、区间震荡 / Range Bound、高波动 / High Volatility、风险规避 / Risk Off。
+展示：
 
-### 无混合编码
+- 中文动作大字
+- 英文动作副标题
+- 信心徽章
 
-所有字符串统一在 strings_zh.py（中文）和 strings_en.py（英文）中定义，渲染时加载两者并一一映射。无任何字符串通过字节拼接组装。所有 HTML 文件声明 meta charset 等于 utf-8，并保存为 UTF-8 编码。
+示例：
+
+- 买入看涨 / Buy Call
+- 高信心 / High Conviction
+
+#### 目标与仓位区
+
+展示：
+
+- 目标价 / Target Price
+- 目标时间窗 / Target Window
+- 建议仓位 / Suggested Size
+
+#### Why Now
+
+最多 3 条：
+
+- 每条一句话
+- 中文在前
+- 英文在后
+- 不写成长段落
+
+#### 风险标签
+
+展示方式：
+
+- 小 chip
+- 不与核心动作争主视觉
+- 只展示 2 到 4 个最重要风险
+
+### 5.2 中部区：研究卡片区
+
+目标：30 秒内读懂支撑逻辑。
+
+包含：
+
+1. Executive Snapshot
+2. Thesis & Catalysts
+3. Technical View
+4. Instrument Choice
+5. Options Structure
+6. Early Exit
+
+#### Executive Snapshot
+
+推荐 4 张 KPI 卡片：
+
+- 当前价格 / Price
+- 上行空间 / Upside
+- 估值位置 / Valuation
+- 验证信心 / Validation Confidence
+
+#### Thesis & Catalysts
+
+内容来源：
+
+- `decision_card`
+- `report.bull_case`
+- `report.why_now`
+
+规则：
+
+- 3 到 5 条要点
+- 每条短句
+- 不要大段研究散文
+
+#### Technical View
+
+必须是老板可读摘要，不是指标堆。
+
+允许展示：
+
+- 趋势 / Trend
+- 支撑位 / Support
+- 阻力位 / Resistance
+- 动能摘要 / Momentum Summary
+
+不允许展示：
+
+- RSI 原始值
+- MACD 原始值
+- 多时间框架指标列表
+- 大段技术指标说明
+
+#### Instrument Choice
+
+只显示三层：
+
+- 首选 / Primary
+- 保守方案 / Conservative
+- 备选方案 / Alternative
+
+不把所有工具做成等权按钮墙。
+
+#### Options Structure
+
+仅当动作涉及期权时显示。
+
+最少显示：
+
+- 期权类型
+- 到期
+- 行权价
+- Break-Even
+- Delta
+- Debit / Credit
+
+#### Early Exit
+
+仅当 `early_exit` 存在时显示。
+
+显示三段：
+
+- 首轮减仓 / First Trim
+- 主要利润 / Main Profit
+- 完全退出 / Full Exit
+
+每段包括：
+
+- 建议动作
+- 触发条件
+- 目标收益区间
+
+### 5.3 底部区：监控与验证区
+
+目标：提供辅助决策上下文，但不抢主视觉。
+
+包含：
+
+1. Watchlist State
+2. Alert Level
+3. Validation Summary
+4. Main Failure Mode
+5. 时间戳
+
+展示形式：
+
+- 小型状态卡
+- badge / chip
+- 低视觉权重
 
 ---
 
-## 八、视觉系统
+## 六、PDF 结构
 
-### 色彩方案
+PDF 是多页正式报告，服务于存档和深读。
 
-橙红色为主要操作色，代码为 #E85A3C，用于操作和警示。青绿色为正面色，代码为 #2DD4A8，用于信心度、支撑和正面指标。深红色为纯风险色，代码为 #C0392B，仅用于风险标签。暖白色为主背景，代码为 #FAF8F5。白色为卡片和面板背景，代码为 #FFFFFF。深炭色为页眉和页脚背景，代码为 #1C1C1E。深中性色为正文，代码为 #1A1A1A。灰色为次要和辅助文字，代码为 #6B7280。白色为深色背景上文字，代码为 #FFFFFF。
+### 6.1 第 1 页：批次概览
 
-### 排版
+包含：
 
-主 UI 字体采用 CJK 兼容无衬线字体栈：Noto Sans SC、PingFang SC、Microsoft YaHei、Helvetica Neue、Arial、sans-serif。数字和金融数据采用 SF Pro Display、Helvetica Neue、Arial、sans-serif。等宽字体用于代码和代码符号：SF Mono、Consolas、monospace。
+- 报告标题
+- 生成日期
+- 本次研究对象数量
+- 批次总览表
+- 简要执行摘要
 
-字号层级：操作文字大号为 56px、font-weight 800，操作副文字为 28px、font-weight 300，代码符号为 28px、font-weight 700，区块标签中文为 13px、font-weight 700，区块标签英文为 10px、font-weight 400，正文为 12px，小标签为 10px。
+总览表建议列：
 
-### 间距系统
+- 排名
+- 代码
+- 公司
+- 核心动作
+- 信心度
+- 目标价
+- 时间窗
 
-间距常数定义如下：--space-xs 为 4px、--space-sm 为 8px、--space-md 为 16px、--space-lg 为 24px、--space-xl 为 32px。
+### 6.2 第 2 页起：单票报告页
 
-### 标签徽章卡片样式
+每只标的一页或一页半，按以下主结构顺序：
 
-状态徽章用于监控状态。Held（持仓中）使用青绿色背景百分之十五透明度配实色青绿文字。High Priority（重点关注）使用橙红色背景百分之十五透明度配实色橙红文字。Research（研究进行中）使用琥珀色背景百分之十五透明度配实色琥珀文字。Passive（被动跟踪）使用灰色背景百分之十透明度配实色灰色文字。
+1. 决策卡片摘要
+2. 工具选择详情
+3. 期权结构详情（仅期权时）
+4. 支撑数据网格（仅参考）
+5. 看多逻辑
+6. 风险观察
 
-信心徽章用于海报区块一，使用 2px solid 边框颜色为 --color-positive，透明背景，中文加英文双层文字。
+#### 决策卡片摘要
 
-风险标签用于海报区块一，深红色边框配半透明深红色背景，中文主文字加英文次要文字。
+这是单票页的主标题区。
 
-KPI 卡片用于海报区块二，白色背景，顶部 3px 边框颜色为 --color-positive，4px 圆角配轻阴影。
+包含：
 
-区块卡片用于海报区块二，白色背景，左侧 3px --color-action 垂直强调线，中文加粗标签配浅色英文标签。
+- 代码
+- 公司名
+- 核心动作
+- 信心度
+- 目标价
+- 时间窗
+- 一句话底线结论
 
-### 工具层级规则
+#### 工具选择详情
 
-工具行最多显示 3 种工具，按优先级排序。首选 / PRIMARY 使用橙红色边框、浅橙红色背景 tint、橙红色角色标签。保守方案 / CONSERVATIVE 使用青绿色边框、浅青绿色背景 tint、青绿色角色标签。备选方案 / ALTERNATIVE 使用灰色边框、无背景 tint、灰色角色标签。已拒绝的工具不在海报工具行中显示。
+必须基于真实对象：
+
+- `instrument_recommendation`
+- `decision_card`
+
+展示：
+
+- 首选工具及理由
+- 保守方案及理由
+- 备选方案及理由
+
+#### 期权结构详情
+
+仅当动作为期权相关时显示。
+
+必须基于真实对象：
+
+- `options_structure`
+- `early_exit`
+
+展示：
+
+- 主合约
+- 配对合约（如有）
+- 到期
+- 行权价
+- 净 debit / 净 credit
+- break-even
+- 最大收益 / 最大损失
+- 退出区间摘要
+
+#### 支撑数据网格
+
+这是遗留字段区，只能是辅助，不是主体。
+
+允许展示：
+
+- 入场价
+- 止损价
+- 目标价
+- 持有周期
+
+来源：
+
+- legacy `signal`
+- legacy `report`
+
+但必须明确标注：
+
+**仅供参考，不构成页面主结构**
+
+#### 看多逻辑
+
+来源：
+
+- `decision_card.thesis_summary`
+- `report.bull_case`
+- `report.why_now`
+
+形式：
+
+- 条列式
+- 最多 4 条主点
+
+#### 风险观察
+
+来源：
+
+- `report.risk_watch`
+- `validation.main_failure_mode`
+- `watchlist_entry.alert_level`
+
+形式：
+
+- 风险标签
+- 观察点列表
+
+### 6.3 末页：监控与验证摘要
+
+包含两张表：
+
+1. Watchlist 表
+2. Validation 表
+
+#### Watchlist 表建议列
+
+- Ticker
+- Action Bias
+- Status
+- Thesis State
+- Alert Level
+
+#### Validation 表建议列
+
+- Ticker
+- Regime
+- Historical Support
+- Environment Fit
+- Main Failure Mode
+- Validation Confidence
 
 ---
 
-## 九、技术分析渲染规则
+## 七、数据映射
 
-### 仅 boss 可读
+### 7.1 主对象映射
 
-技术分析区块是摘要，而非指标数据转储。
+#### `decision_card`
 
-### 应显示的内容
+用于：
 
-支撑位：单一价格水平或区间，例如 165 到 170 美元。阻力位：单一价格水平或区间，例如 220 到 225 美元。趋势：简短方向短语，例如上升趋势 / Uptrend 或区间震荡 / Range Bound。动能（如有）：简短短语，例如动能较强 / Strong Momentum。
+- Poster 顶部核心动作
+- Poster Why Now
+- PDF 单票页决策卡片摘要
+- PDF 单票页看多逻辑
 
-### 不应显示的内容
+#### `instrument_recommendation`
 
-不显示原始指标值（RSI、MACD、布林线值等）。不显示超出单一趋势标签的图表描述。不显示多时间周期分析（除非压缩为一句短语）。
+用于：
 
-### 渲染模式
+- Poster Instrument Choice
+- PDF 工具选择详情
 
-格式为三行文字：支撑位 / Support 加数字，阻力位 / Resistance 加数字，趋势 / Trend 加短语。
+#### `options_structure`
 
----
+用于：
 
-## 十、分页和打印规则
+- Poster Options Structure
+- PDF 期权结构详情
 
-### 海报
+#### `early_exit`
 
-固定宽高比为 3 比 4（竖向）。按 A4 或 Letter 尺寸渲染（视地区而定）。使用 overflow hidden 防止内容溢出页面。使用 page size A4 portrait margin 0 消除浏览器默认边距。
+用于：
 
-### PDF 报告
+- Poster Early Exit
+- PDF 期权结构详情中的退出区间
 
-页面尺寸为 A4 竖向，标准边距 15mm。每个报告页（非末页）使用 page-break-after always。公司报告卡片使用 page-break-inside avoid 防止中途分页。末页使用 page-break-after auto。
+#### `watchlist_entry`
 
-### 整体规则
+用于：
 
-以下元素不可跨页分隔：公司报告卡片（尽量保持在同一页）、监控列表表头（与首行一起保留）、验证表格表头（与首行一起保留）、核心结论框（整体保留）。
+- Poster 底部监控区
+- PDF 末页 Watchlist 表
 
-### 分隔约束
+#### `validation`
 
-批次总览表格允许在行间分页。交易计划网格（4 列）仅在绝对必要时才在列间分页。工具行不可在行中分隔。
+用于：
 
----
+- Poster 底部验证区
+- PDF 末页 Validation 表
 
-## 十一、非目标
+### 7.2 遗留支撑字段
 
-本规范明确不包含以下内容：不增加新交易逻辑（无新的买入、卖出、等待决策算法）；不增加新验证逻辑（无新的验证引擎实现）；不重新设计流程（编排器、子代理执行器、证据库不在范围内）；不引入新数据源（Futu 仍为主要市场数据提供方）；不实现自动执行（无券商集成或下单功能）；不支持熊市表面（系统保持牛市 only 和预警 only）；不制作营销落地页（本界面非营销文档）；不制作 PPT 演示（幻灯片不是目标产出）；不支持实时流 UI（本规范仅覆盖打印和导出表面，不含实时 Web 看板）。
+以下字段只能作为辅助信息：
 
----
+- `signal.entry_price`
+- `signal.stop_loss`
+- `signal.take_profit`
+- `signal.holding_horizon`
+- `signal.confidence`
+- `report.company_name`
+- `report.executive_summary`
 
-## 十二、验收标准
-
-### 通用标准
-
-所有文字中文优先、英文辅佐，遵循中文斜杠 English 模式。无乱码，所有字符串来自 strings_zh.py 和 strings_en.py。无原始数据库转储或无格式数字。空字段显示破折号而非空白。屏幕和打印颜色渲染正确。
-
-### 海报标准
-
-海报在 A4 竖向尺寸下正确渲染无溢出。区块一包含 3 秒决策所需的全部信息。区块二包含 KPI、投资逻辑、技术面、工具、期权、早期退出。区块三包含监控状态和验证摘要。工具行最多显示 3 种工具（首选加保守加备选）。风险标签出现在区块一且可读。打印海报可在单页完整呈现。
-
-### PDF 报告标准
-
-第 1 页显示批次总览表格和执行摘要。第 2 页起每个代码单独一页。末页显示监控列表表格和验证表格。公司报告主结构顺序固定为：决策卡片摘要、工具选择详情、期权结构详情（仅期权时）、支撑数据网格、看多逻辑、风险观察。旧版交易计划网格不在公司页主结构中。表格跨页时表头重复显示。page-break CSS 规则在 Edge headless PDF 导出中正确生效。
-
-### 数据映射标准
-
-PositionDecisionCard 字段正确填充对应海报区块。InstrumentRecommendation 正确标记首选、保守方案、备选方案。OptionsStructure 正确渲染期权类型、标的合约、配对合约、盈亏平衡、最大盈利、最大亏损、Delta。EarlyExitPlan 以三个区间正确渲染早期退出区块。WatchlistEntry 正确填充海报页脚状态徽章和报告末页表格。ValidationResult 正确填充海报页脚验证标签和报告末页表格。Legacy signal 和 report 字段作为支撑数据，不可作为页面主结构。
-
-### 双语标准
-
-所有区块标签中文优先、英文辅佐。工具名称使用固定术语表，无同义词。监控状态使用固定术语表。日期使用 YYYY-MM-DD 格式。百分比使用 XX% 格式。
-
-### 视觉标准
-
-操作色 #E85A3C 仅用于主要操作和强调。正面色 #2DD4A8 仅用于信心度、支撑和正面指标。风险色 #C0392B 仅用于风险标签和亏损指标。字体栈包含 Noto Sans SC 以支持 CJK。所有交互和装饰色通过 print-color-adjust exact 验证。
-
-### 技术标准
-
-export_poster_pdf 正确接收所有决策对象。export_batch_report_pdf 正确接收所有决策对象。render_boss_poster 正确接收所有决策对象。render_batch_report 正确接收所有决策对象。Edge headless PDF 导出生成有效 PDF 文件。现有 export_task_pdf 函数无回归。
+这些字段不允许重新成为页面主结构。
 
 ---
 
-## 附录：文件目标
+## 八、双语与术语规则
 
-本规范管理以下文件的更改：agent/research_v1/report_templates/renderer.py 负责海报和批次报告渲染逻辑；agent/research_v1/report_templates/boss_poster_base.html 负责海报 HTML 模板；agent/research_v1/report_templates/boss_report_base.html 负责批次报告 HTML 模板；agent/research_v1/report_templates/boss_report_pdf.css 负责海报和报告共享 CSS；agent/research_v1/report_templates/strings_zh.py 负责中文字符串常量；agent/research_v1/report_templates/strings_en.py 负责英文字符串常量；agent/research_v1/report_pdf.py 负责 PDF 导出函数（无业务逻辑更改）。
+### 8.1 固定术语
 
-agent/research_v1 下其他文件不在本次重新设计范围内。
+| 中文 | English |
+|---|---|
+| 买入股票 | Buy Stock |
+| 买入看涨 | Buy Call |
+| 牛市看涨价差 | Bull Call Spread |
+| 卖出备兑看跌 | Sell Cash-Secured Put |
+| 备兑看涨 | Covered Call |
+| 观望 | Watchlist |
+| 不交易 | No Trade |
+| 高信心 | High Conviction |
+| 中信心 | Medium Conviction |
+| 低信心 | Low Conviction |
+| 首选 | Primary |
+| 保守方案 | Conservative |
+| 备选方案 | Alternative |
+| 持仓中 | Held |
+| 重点关注 | High Priority |
+| 研究进行中 | Research In Progress |
+| 被动跟踪 | Passive Watch |
+| 强化 | Strengthening |
+| 稳定 | Stable |
+| 弱化 | Weakening |
+| 破坏 | Broken |
+
+### 8.2 空状态
+
+空状态统一使用：
+
+- 暂无数据 / Not Available
+
+不得使用乱码或空白。
+
+### 8.3 编码规则
+
+- 所有模板文件必须保存为 UTF-8
+- HTML 必须声明 `meta charset="utf-8"`
+- 不允许通过错误 decode / encode 链拼装中文
+
+---
+
+## 九、视觉系统
+
+### 9.1 色彩
+
+- 主动作色：橘红 `#E85A3C`
+- 正向色：青绿 `#2DD4A8`
+- 风险色：深红 `#C0392B`
+- 背景色：暖白 `#FAF8F5`
+- 卡片色：白色 `#FFFFFF`
+- 文字色：深灰黑 `#1A1A1A`
+
+### 9.2 字体
+
+中文优先字体栈：
+
+- Noto Sans SC
+- PingFang SC
+- Microsoft YaHei
+- Helvetica Neue
+- Arial
+
+### 9.3 卡片与标签
+
+- 决策主卡最大
+- KPI 卡片次级
+- 风险 chip 小而明确
+- 底部监控 badge 最轻
+
+### 9.4 工具层级
+
+工具区只允许：
+
+- 首选：高强调
+- 保守方案：次强调
+- 备选方案：弱强调
+
+Rejected 工具不在 Poster 主区展示。
+
+---
+
+## 十、技术面渲染规则
+
+技术面摘要只能服务于老板判断，不能变成分析师指标页。
+
+允许：
+
+- 支撑位
+- 阻力位
+- 趋势
+- 动能摘要
+
+不允许：
+
+- 指标列表转储
+- 多行技术说明长文
+- 原始 MACD / RSI 数值墙
+
+推荐渲染格式：
+
+- 支撑位 / Support：165–170 美元
+- 阻力位 / Resistance：220–225 美元
+- 趋势 / Trend：上升趋势 / Uptrend
+- 动能 / Momentum：较强 / Strong
+
+---
+
+## 十一、分页与打印规则
+
+### 11.1 Poster
+
+- 竖版
+- 3:4 比例
+- 单页打印
+- 不允许滚动依赖
+
+### 11.2 PDF
+
+- A4 竖版
+- 标准边距
+- 单票主卡尽量不跨页
+- 表头不与首行分离
+- Options 与 Early Exit 尽量保持同页
+
+### 11.3 Keep Together 规则
+
+以下内容必须避免拆散：
+
+- 决策卡片摘要
+- 工具选择详情
+- 期权结构详情
+- Watchlist 表头与首行
+- Validation 表头与首行
+
+---
+
+## 十二、非目标
+
+本规范不包括：
+
+- 新的交易算法
+- 新的信号逻辑
+- 新的 validation 逻辑
+- 自动交易
+- 实时看盘大屏
+- 做空能力
+- 营销 landing page
+- PPT 幻灯片系统
+
+---
+
+## 十三、验收标准
+
+### 13.1 内容正确性
+
+- 页面主动作来自真实 decision objects
+- 不退回 BUY / HOLD / SELL 表达
+- legacy 字段只是辅助
+
+### 13.2 中文可读性
+
+- 所有中文正常显示
+- 无 mojibake
+- 空状态显示“暂无数据”
+
+### 13.3 Poster
+
+- 单页可打印
+- 顶部区 3 秒可读
+- 中部区 30 秒可读
+- 底部区只作支持
+
+### 13.4 PDF
+
+- 批次概览清晰
+- 单票页是 decision-object-first
+- 末页 watchlist / validation 完整
+
+### 13.5 实现边界
+
+- 不修改业务决策逻辑
+- 不新增交易功能
+- 不改变 bullish-only / alert-only
+
+---
+
+## 十四、实施目标文件
+
+后续实现主要作用于：
+
+- `agent/research_v1/report_pdf.py`
+- `agent/research_v1/report_templates/renderer.py`
+- `agent/research_v1/report_templates/boss_poster_base.html`
+- `agent/research_v1/report_templates/boss_report_base.html`
+- `agent/research_v1/report_templates/boss_report_pdf.css`
+- `agent/research_v1/report_templates/strings_zh.py`
+- `agent/research_v1/report_templates/strings_en.py`
+
+本规范本身不要求在这一轮修改以上实现文件。

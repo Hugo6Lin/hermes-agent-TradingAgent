@@ -1105,9 +1105,32 @@ class ResearchDatabase:
 
     def save_canonical_report(self, report: "CanonicalReport", task_id: str, ticker: str) -> str:
         """Persist a CanonicalReport. Returns report_id."""
+        from dataclasses import asdict
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
+
+            # Migrate schema if decision object columns don't exist
+            try:
+                cursor.execute(
+                    "SELECT decision_card_json FROM canonical_reports WHERE 1=0"
+                )
+            except sqlite3.OperationalError:
+                # Columns missing — add them
+                cursor.execute(
+                    "ALTER TABLE canonical_reports ADD COLUMN decision_card_json TEXT NOT NULL DEFAULT 'null'"
+                )
+                cursor.execute(
+                    "ALTER TABLE canonical_reports ADD COLUMN instrument_rec_json TEXT NOT NULL DEFAULT 'null'"
+                )
+                cursor.execute(
+                    "ALTER TABLE canonical_reports ADD COLUMN options_structure_json TEXT NOT NULL DEFAULT 'null'"
+                )
+                cursor.execute(
+                    "ALTER TABLE canonical_reports ADD COLUMN early_exit_json TEXT NOT NULL DEFAULT 'null'"
+                )
+                conn.commit()
+
             report_id = f"report_{task_id}_{report.title[:20].replace(' ', '_')}"
             trade_plan_dict = None
             if report.trade_plan is not None:
@@ -1120,13 +1143,30 @@ class ResearchDatabase:
                     "size_hint": tp.size_hint,
                     "holding_period": tp.holding_period,
                 }
+
+            # Serialize decision objects (Phase 14-17)
+            def to_dict(obj):
+                if obj is None:
+                    return None
+                if isinstance(obj, dict):
+                    return obj
+                if hasattr(obj, "__dataclass_fields__"):
+                    return asdict(obj)
+                return str(obj)
+
+            decision_card_dict = to_dict(report.decision_card)
+            instrument_rec_dict = to_dict(report.instrument_rec)
+            options_structure_dict = to_dict(report.options_structure)
+            early_exit_dict = to_dict(report.early_exit)
+
             cursor.execute(
                 """
                 INSERT INTO canonical_reports (
                     report_id, task_id, ticker, title, executive_summary,
                     bottom_line, why_now, bull_case, bear_case,
-                    trade_plan_json, risk_watch_json, key_evidence_json, appendix_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    trade_plan_json, risk_watch_json, key_evidence_json, appendix_json,
+                    decision_card_json, instrument_rec_json, options_structure_json, early_exit_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     report_id,
@@ -1142,6 +1182,10 @@ class ResearchDatabase:
                     json.dumps(report.risk_watch),
                     json.dumps(report.key_evidence),
                     json.dumps(report.appendix),
+                    json.dumps(decision_card_dict),
+                    json.dumps(instrument_rec_dict),
+                    json.dumps(options_structure_dict),
+                    json.dumps(early_exit_dict),
                 )
             )
             conn.commit()
@@ -1256,6 +1300,11 @@ class ResearchDatabase:
             d['risk_watch'] = json.loads(d.pop('risk_watch_json', '[]'))
             d['key_evidence'] = json.loads(d.pop('key_evidence_json', '[]'))
             d['appendix'] = json.loads(d.pop('appendix_json', '{}'))
+            # Phase 14-17: deserialize decision objects
+            d['decision_card'] = json.loads(d.pop('decision_card_json', 'null') or 'null')
+            d['instrument_rec'] = json.loads(d.pop('instrument_rec_json', 'null') or 'null')
+            d['options_structure'] = json.loads(d.pop('options_structure_json', 'null') or 'null')
+            d['early_exit'] = json.loads(d.pop('early_exit_json', 'null') or 'null')
             results.append(d)
         return results
 

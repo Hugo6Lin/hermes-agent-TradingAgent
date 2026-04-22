@@ -629,6 +629,16 @@ class HermesResearchApp:
                     errors.append(f"Signal persist error: {exc}")
             if report is not None:
                 try:
+                    # Phase 14-17: enrich report with real decision objects before persisting
+                    from dataclasses import asdict
+                    if decision_card is not None:
+                        report.decision_card = asdict(decision_card) if hasattr(decision_card, "__dataclass_fields__") else decision_card
+                    if instrument_rec is not None:
+                        report.instrument_rec = asdict(instrument_rec) if hasattr(instrument_rec, "__dataclass_fields__") else instrument_rec
+                    if options_structure is not None:
+                        report.options_structure = asdict(options_structure) if hasattr(options_structure, "__dataclass_fields__") else options_structure
+                    if early_exit is not None:
+                        report.early_exit = asdict(early_exit) if hasattr(early_exit, "__dataclass_fields__") else early_exit
                     self._pipeline.persist_canonical_report(task.task_id, report, ticker)
                 except Exception as exc:
                     errors.append(f"Report persist error: {exc}")

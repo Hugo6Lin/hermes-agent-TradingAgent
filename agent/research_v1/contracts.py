@@ -280,6 +280,11 @@ class CanonicalReport:
     risk_watch: list[str] = field(default_factory=list)  # Key risks to monitor
     key_evidence: list[str] = field(default_factory=list)  # IDs of key EvidenceItems used
     appendix: dict[str, Any] = field(default_factory=dict)  # Additional supporting data
+    # Phase 14-17: Decision objects (serialized as dicts for DB persistence)
+    decision_card: dict | None = None  # PositionDecisionCard as dict
+    instrument_rec: dict | None = None  # InstrumentRecommendation as dict
+    options_structure: dict | None = None  # OptionsStructure as dict
+    early_exit: dict | None = None  # EarlyExitPlan as dict
 
     def __post_init__(self):
         if not self.title:

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{{title}}</title>
+  <link rel="stylesheet" href="boss_report_pdf.css"/>
+  <style>
+    body { background: #FAF8F5; }
+  </style>
+</head>
+<body>
+<div class="report">
+
+  <!-- ================================================================ -->
+  <!-- PAGE 1: Batch Overview + Executive Summary -->
+  <!-- ================================================================ -->
+  <div class="report-page">
+
+    <!-- Report Header -->
+    <header class="report-header">
+      <div class="report-title-block">
+        <div class="report-title-zh">{{label_batch_overview}}</div>
+        <div class="report-title-en">{{label_batch_overview_en}}</div>
+      </div>
+      <div class="report-meta">
+        {% if batch_date %}
+        <div>{{label_research_date}} / {{label_research_date_en}}: <span class="report-meta-value">{{batch_date}}</span></div>
+        {% endif %}
+        {% if batch_count %}
+        <div>{{batch_count}} {{label_reports}} / {{label_reports_en}}</div>
+        {% endif %}
+      </div>
+    </header>
+
+    <!-- Batch Overview Table -->
+    <section class="report-section">
+      <div class="report-section-header">
+        <span class="report-section-title-zh">{{label_batch_overview}}</span>
+        <span class="report-section-title-en">/ {{label_batch_overview_en}}</span>
+      </div>
+
+      {% if batch_items %}
+      <table class="batch-table">
+        <thead>
+          <tr>
+            <th><span class="zh">{{label_priority_rank}} /</span> Rank</th>
+            <th><span class="zh">{{label_ticker}} /</span> Ticker</th>
+            <th><span class="zh">{{label_company}} /</span> Company</th>
+            <th><span class="zh">{{label_rating}} /</span> Rating</th>
+            <th><span class="zh">{{label_confidence_pct}} /</span> Conf %</th>
+            <th><span class="zh">{{label_action_bias}} /</span> Bias</th>
+            <th><span class="zh">{{label_target_price}} /</span> Target</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in batch_items %}
+          <tr>
+            <td>{{item.rank}}</td>
+            <td><span class="batch-ticker">{{item.ticker}}</span></td>
+            <td>{{item.company_name}}</td>
+            <td>
+              <span class="batch-rating {{item.rating_class}}">
+                {{item.rating_zh}} / {{item.rating_en}}
+              </span>
+            </td>
+            <td>{{item.confidence}}</td>
+            <td>{{item.action_bias}}</td>
+            <td>{{item.target_price}}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state">
+        <div>
+          <div class="empty-state-zh">{{no_data}}</div>
+          <div>{{no_data_en}}</div>
+        </div>
+      </div>
+      {% endif %}
+    </section>
+
+    <!-- Executive Summary -->
+    <section class="report-section">
+      <div class="report-section-header">
+        <span class="report-section-title-zh">{{label_executive_summary}}</span>
+        <span class="report-section-title-en">/ {{label_executive_summary_en}}</span>
+      </div>
+      {% if executive_summary %}
+      <p style="font-size: 14px; line-height: 1.8; color: #1A1A1A;">{{executive_summary}}</p>
+      {% else %}
+      <div class="empty-state">
+        <div>
+          <div class="empty-state-zh">{{no_data}}</div>
+          <div>{{no_data_en}}</div>
+        </div>
+      </div>
+      {% endif %}
+    </section>
+
+  </div>
+
+  <!-- ================================================================ -->
+  <!-- PAGE 2+: Individual Company Reports — Decision-Object-First -->
+  <!-- ================================================================ -->
+  {% for item in company_reports %}
+  <div class="report-page company-report-page">
+
+    <!-- Section 1: Decision Card Summary -->
+    <div class="decision-card-summary">
+      <div class="decision-card-left">
+        <div class="decision-action-zh">{{item.action_zh}}</div>
+        <div class="decision-action-en">{{item.action_en}}</div>
+        <div class="decision-conviction">
+          <span class="conviction-badge-zh">{{item.conviction_zh}}</span>
+          <span class="conviction-badge-en">{{item.conviction_en}}</span>
+        </div>
+      </div>
+      <div class="decision-card-right">
+        <div class="decision-ticker">{{item.ticker}}</div>
+        <div class="decision-company">{{item.company_name}}</div>
+      </div>
+    </div>
+
+    <!-- Section 2: Instrument Detail (3 boxes) -->
+    {% if item.instrument_primary or item.instrument_conservative or item.instrument_alternative %}
+    <div class="report-section">
+      <div class="report-section-header">
+        <span class="report-section-title-zh">{{label_instrument_detail}}</span>
+        <span class="report-section-title-en">/ {{label_instrument_detail_en}}</span>
+      </div>
+      <div class="instrument-detail-row">
+        {% if item.instrument_primary %}
+        <div class="instrument-detail-box primary">
+          <div class="instrument-detail-role">{{label_primary}} / {{label_primary_en}}</div>
+          <div class="instrument-detail-name-zh">{{item.instrument_primary.name_zh}}</div>
+          <div class="instrument-detail-name-en">{{item.instrument_primary.name_en}}</div>
+          <div class="instrument-detail-reason">{{item.instrument_primary.reason}}</div>
+        </div>
+        {% endif %}
+        {% if item.instrument_conservative %}
+        <div class="instrument-detail-box conservative">
+          <div class="instrument-detail-role">{{label_conservative}} / {{label_conservative_en}}</div>
+          <div class="instrument-detail-name-zh">{{item.instrument_conservative.name_zh}}</div>
+          <div class="instrument-detail-name-en">{{item.instrument_conservative.name_en}}</div>
+          <div class="instrument-detail-reason">{{item.instrument_conservative.reason}}</div>
+        </div>
+        {% endif %}
+        {% if item.instrument_alternative %}
+        <div class="instrument-detail-box alternative">
+          <div class="instrument-detail-role">{{label_alternative}} / {{label_alternative_en}}</div>
+          <div class="instrument-detail-name-zh">{{item.instrument_alternative.name_zh}}</div>
+          <div class="instrument-detail-name-en">{{item.instrument_alternative.name_en}}</div>
+          <div class="instrument-detail-reason">{{item.instrument_alternative.reason}}</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Section 3: Options Structure Detail (only if present) -->
+    {% if item.options_detail and item.options_detail.option_type and item.options_detail.option_type != '—' %}
+    <div class="report-section">
+      <div class="report-section-header">
+        <span class="report-section-title-zh">{{label_options_structure_detail}}</span>
+        <span class="report-section-title-en">/ {{label_options_structure_detail_en}}</span>
+      </div>
+      <div class="options-detail-grid">
+        <div class="options-detail-item">
+          <div class="options-detail-label-zh">{{label_option_type}} / {{label_option_type_en}}</div>
+          <div class="options-detail-value">{{item.options_detail.option_type}}</div>
+        </div>
+        <div class="options-detail-item">
+          <div class="options-detail-label-zh">{{label_expiry}} / {{label_expiry_en}}</div>
+          <div class="options-detail-value">{{item.options_detail.expiry}}</div>
+        </div>
+        <div class="options-detail-item">
+          <div class="options-detail-label-zh">{{label_strike}} / {{label_strike_en}}</div>
+          <div class="options-detail-value">{{item.options_detail.strike}}</div>
+        </div>
+        <div class="options-detail-item">
+          <div class="options-detail-label-zh">{{label_break_even}} / {{label_break_even_en}}</div>
+          <div class="options-detail-value">{{item.options_detail.break_even}}</div>
+        </div>
+        <div class="options-detail-item">
+          <div class="options-detail-label-zh">{{label_delta}} / {{label_delta_en}}</div>
+          <div class="options-detail-value">{{item.options_detail.delta}}</div>
+        </div>
+        {% if item.options_detail.net_debit and item.options_detail.net_debit != '—' %}
+        <div class="options-detail-item">
+          <div class="options-detail-label-zh">{{label_net_debit}} / {{label_net_debit_en}}</div>
+          <div class="options-detail-value">{{item.options_detail.net_debit}}</div>
+        </div>
+        {% endif %}
+        {% if item.options_detail.net_credit and item.options_detail.net_credit != '—' %}
+        <div class="options-detail-item">
+          <div class="options-detail-label-zh">{{label_net_credit}} / {{label_net_credit_en}}</div>
+          <div class="options-detail-value">{{item.options_detail.net_credit}}</div>
+        </div>
+        {% endif %}
+        {% if item.options_detail.max_profit and item.options_detail.max_profit != '—' %}
+        <div class="options-detail-item">
+          <div class="options-detail-label-zh">{{label_max_profit}} / {{label_max_profit_en}}</div>
+          <div class="options-detail-value positive">{{item.options_detail.max_profit}}</div>
+        </div>
+        {% endif %}
+        {% if item.options_detail.max_loss and item.options_detail.max_loss != '—' %}
+        <div class="options-detail-item">
+          <div class="options-detail-label-zh">{{label_max_loss}} / {{label_max_loss_en}}</div>
+          <div class="options-detail-value negative">{{item.options_detail.max_loss}}</div>
+        </div>
+        {% endif %}
+      </div>
+      {% if item.early_exit_zones %}
+      <div class="early-exit-summary">
+        <div class="ee-summary-label">{{label_early_exit}} / {{label_early_exit_en}}</div>
+        <div class="ee-summary-zones">
+          {% for zone in item.early_exit_zones %}
+          <div class="ee-summary-zone">
+            <span class="ee-zone-name">{{zone.zone_name_zh}}</span>
+            <span class="ee-zone-action">{{zone.action_zh}}</span>
+            <span class="ee-zone-trigger">{{zone.trigger}}</span>
+            <span class="ee-zone-return">{{zone.target_return}}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Section 4: Supporting Data Grid (explicitly supporting-only) -->
+    {% if item.supporting_entry != '—' or item.supporting_stop != '—' or item.supporting_target != '—' or item.supporting_horizon != '—' %}
+    <div class="report-section supporting-only">
+      <div class="supporting-only-header">
+        <span class="report-section-title-zh">{{label_supporting_data_grid}}</span>
+        <span class="report-section-title-en">/ {{label_supporting_data_grid_en}}</span>
+        <span class="supporting-disclaimer">{{label_supporting_only}} / {{label_supporting_only_en}}</span>
+      </div>
+      <div class="supporting-grid">
+        {% if item.supporting_entry and item.supporting_entry != '—' %}
+        <div class="supporting-grid-item">
+          <div class="supporting-grid-label-zh">{{label_entry_price}}</div>
+          <div class="supporting-grid-label"> / {{label_entry_price_en}}</div>
+          <div class="supporting-grid-value">{{item.supporting_entry}}</div>
+        </div>
+        {% endif %}
+        {% if item.supporting_stop and item.supporting_stop != '—' %}
+        <div class="supporting-grid-item">
+          <div class="supporting-grid-label-zh">{{label_stop_loss}}</div>
+          <div class="supporting-grid-label"> / {{label_stop_loss_en}}</div>
+          <div class="supporting-grid-value negative">{{item.supporting_stop}}</div>
+        </div>
+        {% endif %}
+        {% if item.supporting_target and item.supporting_target != '—' %}
+        <div class="supporting-grid-item">
+          <div class="supporting-grid-label-zh">{{label_target_price}}</div>
+          <div class="supporting-grid-label"> / {{label_target_price_en}}</div>
+          <div class="supporting-grid-value positive">{{item.supporting_target}}</div>
+        </div>
+        {% endif %}
+        {% if item.supporting_horizon and item.supporting_horizon != '—' %}
+        <div class="supporting-grid-item">
+          <div class="supporting-grid-label-zh">{{label_holding_period}}</div>
+          <div class="supporting-grid-label"> / {{label_holding_period_en}}</div>
+          <div class="supporting-grid-value">{{item.supporting_horizon}}</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Section 5: Bull Case -->
+    {% if item.bull_case %}
+    <div class="report-section">
+      <div class="report-section-header">
+        <span class="report-section-title-zh">{{label_bull_case}}</span>
+        <span class="report-section-title-en">/ {{label_bull_case_en}}</span>
+      </div>
+      <p class="section-text">{{item.bull_case}}</p>
+    </div>
+    {% endif %}
+
+    <!-- Section 6: Risk Watch -->
+    {% if item.risk_watch %}
+    <div class="report-section">
+      <div class="report-section-header">
+        <span class="report-section-title-zh">{{label_risk_watch}}</span>
+        <span class="report-section-title-en">/ {{label_risk_watch_en}}</span>
+      </div>
+      <ul class="risk-list">
+        {% for risk in item.risk_watch %}
+        <li>{{risk}}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+  </div>
+  {% endfor %}
+
+  <!-- ================================================================ -->
+  <!-- FINAL PAGE: Watchlist + Validation -->
+  <!-- ================================================================ -->
+  {% if watchlist_entries or validation_results %}
+  <div class="report-page">
+
+    <header class="report-header">
+      <div class="report-title-block">
+        <div class="report-title-zh">{{label_watchlist_state}} and {{label_validation_summary}}</div>
+        <div class="report-title-en">{{label_watchlist_state_en}} and {{label_validation_summary_en}}</div>
+      </div>
+    </header>
+
+    <!-- Watchlist Table -->
+    {% if watchlist_entries %}
+    <section class="report-section">
+      <div class="report-section-header">
+        <span class="report-section-title-zh">{{label_watchlist_state}}</span>
+        <span class="report-section-title-en">/ {{label_watchlist_state_en}}</span>
+      </div>
+      <table class="batch-table">
+        <thead>
+          <tr>
+            <th>{{label_ticker}} / Ticker</th>
+            <th>{{label_action_bias}} / Bias</th>
+            <th>Status / Status</th>
+            <th>Thesis / Thesis</th>
+            <th>Alert / Alert</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in watchlist_entries %}
+          <tr>
+            <td><span class="batch-ticker">{{entry.ticker}}</span></td>
+            <td>{{entry.current_action_bias}}</td>
+            <td><span class="status-badge {{entry.status_class}}">{{entry.status_zh}}</span></td>
+            <td>{{entry.thesis_state_zh}}</td>
+            <td><span class="status-badge {% if entry.alert_level_zh == '立即关注' %}high-priority{% elif entry.alert_level_zh == '需要关注' %}research{% else %}passive{% endif %}">{{entry.alert_level_zh}}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+
+    <!-- Validation Table -->
+    {% if validation_results %}
+    <section class="report-section">
+      <div class="report-section-header">
+        <span class="report-section-title-zh">{{label_validation_summary}}</span>
+        <span class="report-section-title-en">/ {{label_validation_summary_en}}</span>
+      </div>
+      <table class="batch-table">
+        <thead>
+          <tr>
+            <th>{{label_ticker}} / Ticker</th>
+            <th>{{label_regime}} / {{label_regime_en}}</th>
+            <th>{{label_historical_support}} / {{label_historical_support_en}}</th>
+            <th>{{label_environment_fit}} / {{label_environment_fit_en}}</th>
+            <th>{{label_failure_mode}} / {{label_failure_mode_en}}</th>
+            <th>{{label_confidence}} / {{label_confidence_en}}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for result in validation_results %}
+          <tr>
+            <td><span class="batch-ticker">{{result.ticker}}</span></td>
+            <td>{{result.regime}}</td>
+            <td>{{result.historical_support}}</td>
+            <td>{{result.environment_fit}}</td>
+            <td>{{result.main_failure_mode}}</td>
+            <td>
+              <span class="batch-rating {% if result.validation_confidence >= 0.7 %}buy{% elif result.validation_confidence >= 0.4 %}hold{% else %}underperform{% endif %}">
+                {{result.confidence_pct}}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+
+  </div>
+  {% endif %}
+
+</div>
+</body>
+</html>

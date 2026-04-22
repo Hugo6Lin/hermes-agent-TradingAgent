@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{{title}}</title>
+  <link rel="stylesheet" href="boss_report_pdf.css"/>
+  <style>
+    /* Poster-specific overrides */
+    .poster {
+      width: 100%;
+      max-width: 210mm;
+      aspect-ratio: 3 / 4;
+      margin: 0 auto;
+    }
+  </style>
+</head>
+<body>
+<div class="poster">
+
+  <!-- ================================================================ -->
+  <!-- TOP ZONE: Decision Hero (60% height) -->
+  <!-- ================================================================ -->
+  <header class="poster-header">
+
+    <!-- LEFT: Action Block - DOMINANT -->
+    <div class="action-block">
+      <div class="action-label">{{strings.label_action}} / {{strings.label_action_en}}</div>
+      <div class="action-label-zh">{{action_zh}}</div>
+      <div class="action-main">{{action_zh}}</div>
+      <div class="action-sub">{{action_en}}</div>
+
+      <div class="size-target-block">
+        <div class="size-line">
+          <span class="size-label-zh">{{strings.label_suggested_size}}</span>
+          <span class="size-label"> / {{strings.label_suggested_size_en}}</span>
+        </div>
+        <div class="size-value">{{suggested_size}}</div>
+
+        <div class="target-line" style="margin-top: 12px;">
+          <span class="target-label-zh">{{strings.label_target_window}}</span>
+          <span class="target-label"> / {{strings.label_target_window_en}}</span>
+        </div>
+        <div class="target-value">{{target_window}}</div>
+
+        <div class="target-line" style="margin-top: 8px;">
+          <span class="target-label-zh">{{strings.label_target_price}}</span>
+          <span class="target-label"> / {{strings.label_target_price_en}}</span>
+        </div>
+        <div class="target-value" style="font-size: 22px;">{{target_price}}</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Ticker + Conviction + Why Now -->
+    <div class="ticker-block">
+      <div class="ticker-symbol">{{ticker}}</div>
+      <div class="ticker-company">{{company_name}}</div>
+      <div class="conviction-badge">
+        <span class="conviction-badge-zh">{{conviction_zh}}</span>
+        <span class="conviction-badge-en">{{conviction_en}}</span>
+      </div>
+    </div>
+
+    <div class="why-now">
+      <div class="why-now-label-zh">{{strings.label_why_now}} / {{strings.label_why_now_en}}</div>
+      <ul class="why-now-list">
+        {% for item in why_now %}
+        <li class="why-now-item">
+          {{item.zh}}
+          <span class="why-now-item-en">{{item.en}}</span>
+        </li>
+        {% else %}
+        <li class="why-now-item">{{strings.empty_thesis}}</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <!-- BOTTOM: Risk Chips - small, horizontal -->
+    <div class="risk-chips">
+      {% for risk in top_risks %}
+      <div class="risk-chip">
+        <span class="risk-chip-zh">{{risk.zh}}</span>
+        <span class="risk-chip-en">/ {{risk.en}}</span>
+      </div>
+      {% else %}
+      <div class="risk-chip">
+        <span class="risk-chip-zh">{{strings.empty_risks}}</span>
+      </div>
+      {% endfor %}
+    </div>
+
+  </header>
+
+  <!-- ================================================================ -->
+  <!-- MIDDLE ZONE: KPI + Thesis/Technical + Instrument + Options (30%) -->
+  <!-- ================================================================ -->
+  <main class="poster-body">
+
+    <!-- KPI Cards: 4 columns -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label-zh">{{strings.label_current_price}}</div>
+        <div class="kpi-label"> / {{strings.label_current_price_en}}</div>
+        <div class="kpi-value">{{kpi.price|default(strings.empty_kpi)}}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label-zh">{{strings.label_pe_ratio}}</div>
+        <div class="kpi-label"> / {{strings.label_pe_ratio_en}}</div>
+        <div class="kpi-value">{{kpi.pe|default(strings.empty_kpi)}}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label-zh">{{strings.label_eps_growth}}</div>
+        <div class="kpi-label"> / {{strings.label_eps_growth_en}}</div>
+        <div class="kpi-value positive">{{kpi.eps_growth|default(strings.empty_kpi)}}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label-zh">{{strings.label_analyst_rating}}</div>
+        <div class="kpi-label"> / {{strings.label_analyst_rating_en}}</div>
+        <div class="kpi-value positive">{{kpi.analyst_rating|default(strings.empty_kpi)}}</div>
+      </div>
+    </div>
+
+    <!-- Thesis & Technical: 2 columns -->
+    <div class="thesis-technical">
+      <div class="section-card">
+        <div class="section-label-zh">{{strings.label_thesis_catalysts}}</div>
+        <div class="section-label"> / {{strings.label_thesis_catalysts_en}}</div>
+        <ul class="section-bullets">
+          {% for item in thesis_catalysts %}
+          <li class="section-bullet" data-num="{{loop.index}}">
+            {{item.zh}}
+            <span class="section-bullet-en">{{item.en}}</span>
+          </li>
+          {% else %}
+          <li class="section-bullet">{{strings.empty_thesis}}</li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <div class="section-card">
+        <div class="section-label-zh">{{strings.label_technical_analysis}}</div>
+        <div class="section-label"> / {{strings.label_technical_analysis_en}}</div>
+        <div class="section-content">
+          {% if technical %}
+          <p><strong>{{strings.label_support}} / {{strings.label_support_en}}:</strong> {{technical.support}}</p>
+          <p><strong>{{strings.label_resistance}} / {{strings.label_resistance_en}}:</strong> {{technical.resistance}}</p>
+          <p><strong>{{strings.label_trend}} / {{strings.label_trend_en}}:</strong> {{technical.trend}}</p>
+          {% else %}
+          <p>{{strings.empty_technical}}</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Instrument Choice: 3 boxes — PRIMARY / CONSERVATIVE / ALTERNATIVE -->
+    <div class="instrument-row">
+      {% for inst in instruments %}
+      {% if inst.role != 'rejected' %}
+      <div class="instrument-box {% if inst.role == 'primary' %}primary{% elif inst.role == 'conservative' %}conservative{% else %}alternative{% endif %}">
+        <div class="instrument-name-zh">{{inst.name_zh}}</div>
+        <div class="instrument-name-en">{{inst.name_en}}</div>
+        <div class="instrument-rec">{{inst.reason}}</div>
+        <div style="margin-top: 4px; font-size: 10px; color: {% if inst.role == 'primary' %}#E85A3C{% elif inst.role == 'conservative' %}#2DD4A8{% else %}#6B7280{% endif %};">
+          {% if inst.role == 'primary' %}{{strings.label_primary}}{% elif inst.role == 'conservative' %}{{strings.label_conservative}}{% else %}{{strings.label_alternative}}{% endif %}
+        </div>
+      </div>
+      {% endif %}
+      {% else %}
+      {% for name in ['股票 / Stock', '买入看涨 / Call', '牛市价差 / Spread'] %}
+      <div class="instrument-box">
+        <div class="instrument-name-zh">{{name}}</div>
+        <div class="instrument-rec">{{strings.empty_instrument}}</div>
+      </div>
+      {% endfor %}
+      {% endfor %}
+    </div>
+
+    <!-- Options Structure: compact card (only if options present) -->
+    {% if options and options.option_type %}
+    <div class="options-card">
+      <div>
+        <div class="options-label-zh">{{strings.label_option_type}} / {{strings.label_option_type_en}}</div>
+        <div class="options-value">{{options.option_type}}</div>
+      </div>
+      <div>
+        <div class="options-label-zh">{{strings.label_expiry}} / {{strings.label_expiry_en}}</div>
+        <div class="options-value">{{options.expiry}}</div>
+      </div>
+      <div>
+        <div class="options-label-zh">{{strings.label_strike}} / {{strings.label_strike_en}}</div>
+        <div class="options-value">{{options.strike}}</div>
+      </div>
+      <div>
+        <div class="options-label-zh">{{strings.label_break_even}} / {{strings.label_break_even_en}}</div>
+        <div class="options-value">{{options.break_even}}</div>
+      </div>
+      <div>
+        <div class="options-label-zh">{{strings.label_delta}} / {{strings.label_delta_en}}</div>
+        <div class="options-value">{{options.delta}}</div>
+      </div>
+      {% if options.net_debit and options.net_debit != '—' %}
+      <div>
+        <div class="options-label-zh">{{strings.label_net_debit}} / {{strings.label_net_debit_en}}</div>
+        <div class="options-value">{{options.net_debit}}</div>
+      </div>
+      {% endif %}
+      {% if options.net_credit and options.net_credit != '—' %}
+      <div>
+        <div class="options-label-zh">{{strings.label_net_credit}} / {{strings.label_net_credit_en}}</div>
+        <div class="options-value">{{options.net_credit}}</div>
+      </div>
+      {% endif %}
+      {% if options.max_profit and options.max_profit != '—' %}
+      <div>
+        <div class="options-label-zh">{{strings.label_max_profit}} / {{strings.label_max_profit_en}}</div>
+        <div class="options-value positive">{{options.max_profit}}</div>
+      </div>
+      {% endif %}
+      {% if options.max_loss and options.max_loss != '—' %}
+      <div>
+        <div class="options-label-zh">{{strings.label_max_loss}} / {{strings.label_max_loss_en}}</div>
+        <div class="options-value" style="color: #C0392B;">{{options.max_loss}}</div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Early Exit Zones (Phase 15) -->
+    {% if early_exit_zones %}
+    <div class="early-exit-section">
+      <div class="section-label-zh">{{strings.label_early_exit}} / {{strings.label_early_exit_en}}</div>
+      <div class="early-exit-zones">
+        {% for zone in early_exit_zones %}
+        <div class="early-exit-zone">
+          <div class="ee-zone-name">{{zone.zone_name_zh}}</div>
+          <div class="ee-zone-action">{{zone.action_zh}}</div>
+          <div class="ee-zone-trigger">{{zone.trigger}}</div>
+          <div class="ee-zone-return">{{zone.target_return}}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+  </main>
+
+  <!-- ================================================================ -->
+  <!-- BOTTOM ZONE: Watchlist + Validation (10%) - de-emphasized -->
+  <!-- ================================================================ -->
+  <footer class="poster-footer">
+
+    <div class="footer-left">
+      <div>
+        <div class="footer-label-zh">{{strings.label_watchlist_state}}</div>
+        <div class="footer-label"> / {{strings.label_watchlist_state_en}}</div>
+      </div>
+      {% if watchlist_state %}
+      <span class="status-badge {{watchlist_state.status_class}}">
+        {{watchlist_state.status_zh}} / {{watchlist_state.status_en}}
+      </span>
+      <span class="footer-label" style="margin-left: 8px;">
+        {{strings.label_action_bias}} / {{strings.label_action_bias_en}}:
+      </span>
+      <span class="footer-label-zh">{{watchlist_state.action_bias}}</span>
+      {% else %}
+      <span class="status-badge passive">{{strings.empty_watchlist}}</span>
+      {% endif %}
+    </div>
+
+    <div class="validation-chips">
+      {% if validation %}
+      <div class="validation-chip">
+        <span class="validation-chip-label">{{strings.label_regime}} / {{strings.label_regime_en}}:</span>
+        <span class="validation-chip-value">{{validation.regime}}</span>
+      </div>
+      <div class="validation-chip">
+        <span class="validation-chip-label">{{strings.label_confidence}} / {{strings.label_confidence_en}}:</span>
+        <span class="validation-chip-value {% if validation.confidence_class %}{{validation.confidence_class}}{% endif %}">{{validation.confidence}}</span>
+      </div>
+      {% else %}
+      <div class="validation-chip">
+        <span class="validation-chip-label">{{strings.empty_validation}}</span>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="footer-brand">
+      <div class="footer-brand-zh">{{strings.label_hermes_desk}} / {{strings.label_hermes_desk_en}}</div>
+      <div class="footer-brand">{{strings.label_decision_board}} / {{strings.label_decision_board_en}}</div>
+      {% if generated_at %}
+      <div class="footer-brand">{{strings.label_generated_at}} / {{strings.label_generated_at_en}}: {{generated_at}}</div>
+      {% endif %}
+    </div>
+
+  </footer>
+
+</div>
+</body>
+</html>

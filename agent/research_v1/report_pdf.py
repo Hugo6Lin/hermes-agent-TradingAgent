@@ -1,11 +1,22 @@
-"""PDF export for Hermes canonical research reports."""
+﻿"""PDF export for Hermes canonical research reports.
+
+This module provides two export paths:
+1. export_task_pdf - exports a research task as a legacy-style PDF (backward compatible)
+2. export_poster_pdf - exports a single-ticker decision poster (new poster-style)
+3. export_batch_report_pdf - exports a multi-ticker batch report (new report-style)
+
+All use the same color system: orange-red (#E85A3C) + teal-green (#2DD4A8)
+and Chinese-first bilingual hierarchy.
+"""
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any, Optional
 
 from agent.research_v1.data.database import ResearchDatabase
 
@@ -233,62 +244,29 @@ def _render_report_html(reports: list[dict], signals: list[dict], watchlist_entr
 """
 
 
-def export_task_pdf(
-    database: ResearchDatabase,
-    task_id: str,
-    output_dir: str | Path,
-) -> Path:
-    """
-    Export a research task's canonical reports and signals as a PDF document.
+def _write_html_to_pdf(html: str, pdf_path: Path, timeout: int = 120) -> Path:
+    """Write HTML content to PDF using Edge headless.
 
     Args:
-        database: ResearchDatabase instance.
-        task_id: The research task ID.
-        output_dir: Directory to write the PDF.
+        html: HTML content string.
+        pdf_path: Output path for the PDF file.
+        timeout: Timeout in seconds for the Edge process.
 
     Returns:
         Path to the exported PDF file.
     """
-    reports = database.get_canonical_reports_by_task(task_id)
-    conn = database._get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM canonical_signals WHERE task_id = ? ORDER BY created_at DESC",
-        (task_id,),
-    )
-    import json
-    signals = []
-    for row in cursor.fetchall():
-        d = dict(row)
-        d['risk_flags'] = json.loads(d.pop('risk_flags_json', '[]'))
-        signals.append(d)
-    conn.close()
-
-    # Phase 16: fetch watchlist entries
-    try:
-        watchlist_entries = database.list_watchlist_entries()
-    except Exception:
-        watchlist_entries = []
-
-    # Phase 17: fetch validation results
-    try:
-        validation_results = database.list_validation_results()
-    except Exception:
-        validation_results = []
-
-    if not reports and not signals:
-        raise KeyError(f"No canonical reports or signals found for task {task_id!r}")
-
-    output_path = Path(output_dir).expanduser().resolve()
-    output_path.mkdir(parents=True, exist_ok=True)
-    pdf_path = output_path / f"task_{task_id}.pdf"
-
-    html = _render_report_html(reports, signals, watchlist_entries, validation_results)
     edge_executable = _find_edge_executable()
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(dir=str(output_path)) as temp_dir:
-        html_path = Path(temp_dir) / f"task_{task_id}.html"
+    with tempfile.TemporaryDirectory(dir=str(pdf_path.parent)) as temp_dir:
+        html_path = Path(temp_dir) / "output.html"
         html_path.write_text(html, encoding="utf-8")
+
+        # Copy CSS to temp dir for local loading
+        template_dir = Path(__file__).parent / "report_templates"
+        css_path = template_dir / "boss_report_pdf.css"
+        if css_path.exists():
+            shutil.copy(css_path, Path(temp_dir) / "boss_report_pdf.css")
 
         command = [
             str(edge_executable),
@@ -306,7 +284,7 @@ def export_task_pdf(
             check=False,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=timeout,
         )
         if result.returncode != 0:
             raise RuntimeError(
@@ -319,3 +297,340 @@ def export_task_pdf(
         raise RuntimeError("PDF export completed but did not produce a valid file")
 
     return pdf_path
+
+
+# =============================================================================
+# Legacy API - kept for backward compatibility
+# =============================================================================
+
+def export_task_pdf(
+    database: ResearchDatabase,
+    task_id: str,
+    output_dir: str | Path,
+) -> Path:
+    """
+    Export a research task's canonical reports and signals as a PDF document.
+
+    Uses the new Boss Report template (render_batch_report) instead of the legacy
+    raw-HTML template.
+
+    Args:
+        database: ResearchDatabase instance.
+        task_id: The research task ID.
+        output_dir: Directory to write the PDF.
+
+    Returns:
+        Path to the exported PDF file.
+    """
+    from agent.research_v1.report_templates.renderer import render_batch_report
+
+    def _first_present(*values: Any, default: Any = "N/A") -> Any:
+        for value in values:
+            if value not in (None, "", [], {}):
+                return value
+        return default
+
+    reports = database.get_canonical_reports_by_task(task_id)
+    conn = database._get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM canonical_signals WHERE task_id = ? ORDER BY created_at DESC",
+        (task_id,),
+    )
+    signals = []
+    for row in cursor.fetchall():
+        record = dict(row)
+        record["risk_flags"] = json.loads(record.pop("risk_flags_json", "[]"))
+        signals.append(record)
+    conn.close()
+
+    try:
+        watchlist_entries = database.list_watchlist_entries()
+    except Exception:
+        watchlist_entries = []
+
+    try:
+        validation_results = database.list_validation_results()
+    except Exception:
+        validation_results = []
+
+    if not reports and not signals:
+        raise KeyError(f"No canonical reports or signals found for task {task_id!r}")
+
+    signal_by_ticker = {
+        signal.get("ticker"): signal
+        for signal in signals
+        if signal.get("ticker")
+    }
+
+    batch_items: list[dict[str, Any]] = []
+    company_reports: list[dict[str, Any]] = []
+    for rank, report in enumerate(reports, start=1):
+        trade_plan = report.get("trade_plan")
+        if isinstance(trade_plan, str):
+            try:
+                trade_plan = json.loads(trade_plan)
+            except (json.JSONDecodeError, TypeError):
+                trade_plan = {}
+        trade_plan = trade_plan or {}
+
+        decision_card = report.get("decision_card")
+        instrument_rec = report.get("instrument_rec")
+        options_structure = report.get("options_structure")
+        early_exit = report.get("early_exit")
+
+        ticker = report.get("ticker", "N/A")
+        signal = signal_by_ticker.get(ticker, {})
+        primary_action = _first_present(
+            decision_card.get("primary_action") if isinstance(decision_card, dict) else None,
+            instrument_rec.get("primary_action") if isinstance(instrument_rec, dict) else None,
+            signal.get("rating"),
+            report.get("rating"),
+            default="Watchlist",
+        )
+        confidence = _first_present(
+            report.get("confidence"),
+            signal.get("confidence"),
+            default=0,
+        )
+        company_name = _first_present(
+            report.get("company_name"),
+            report.get("title"),
+            signal.get("company_name"),
+            default="N/A",
+        )
+        bottom_line = _first_present(
+            report.get("bottom_line"),
+            decision_card.get("thesis_summary") if isinstance(decision_card, dict) else None,
+            default="",
+        )
+        why_now = _first_present(
+            report.get("why_now"),
+            decision_card.get("why_now") if isinstance(decision_card, dict) else None,
+            default="",
+        )
+        bull_case = _first_present(
+            report.get("bull_case"),
+            decision_card.get("thesis_summary") if isinstance(decision_card, dict) else None,
+            default="",
+        )
+        entry_price = _first_present(
+            trade_plan.get("entry_price"),
+            signal.get("entry_price"),
+            default="N/A",
+        )
+        take_profit = _first_present(
+            trade_plan.get("take_profit"),
+            signal.get("take_profit"),
+            default="N/A",
+        )
+
+        batch_items.append({
+            "symbol": ticker,
+            "company_name": company_name,
+            "overall_rating": primary_action,
+            "confidence": confidence,
+            "action": primary_action,
+            "entry_price": entry_price,
+            "take_profit": take_profit,
+            "display_rank": rank,
+        })
+
+        company_reports.append({
+            "ticker": ticker,
+            "company_name": company_name,
+            "rating": primary_action,
+            "confidence": confidence,
+            "bottom_line": bottom_line,
+            "why_now": why_now,
+            "trade_plan": trade_plan,
+            "bull_case": bull_case,
+            "bear_case": report.get("bear_case", ""),
+            "risk_watch": report.get("risk_watch", []),
+            "research_summary": report.get("executive_summary", ""),
+            "position_decision": decision_card,
+            "instrument_rec": instrument_rec,
+            "options_structure": options_structure,
+            "early_exit": early_exit,
+        })
+
+    if not batch_items:
+        for rank, signal in enumerate(signals, start=1):
+            primary_action = _first_present(signal.get("rating"), default="Watchlist")
+            batch_items.append({
+                "symbol": signal.get("ticker", "N/A"),
+                "company_name": signal.get("company_name", "N/A"),
+                "overall_rating": primary_action,
+                "confidence": signal.get("confidence", 0),
+                "action": primary_action,
+                "entry_price": signal.get("entry_price", "N/A"),
+                "take_profit": signal.get("take_profit", "N/A"),
+                "display_rank": rank,
+            })
+
+    output_path = Path(output_dir).expanduser().resolve()
+    pdf_path = output_path / f"task_{task_id}.pdf"
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+
+    template_dir = Path(__file__).parent / "report_templates"
+    css_path = template_dir / "boss_report_pdf.css"
+    css_content = css_path.read_text(encoding="utf-8") if css_path.exists() else ""
+
+    if batch_items:
+        top_item = batch_items[0]
+        executive_summary = (
+            f"Top pick: {top_item.get('symbol', 'N/A')} "
+            f"({top_item.get('action', 'Watchlist')}) - "
+            f"Confidence: {top_item.get('confidence', 0):.0%}"
+        )
+    else:
+        executive_summary = ""
+
+    html = render_batch_report(
+        batch_items=batch_items,
+        company_reports=company_reports,
+        watchlist_entries=watchlist_entries,
+        validation_results=validation_results,
+        executive_summary=executive_summary,
+    )
+
+    if css_content and "<link rel=" in html:
+        html = html.replace(
+            '<link rel="stylesheet" href="boss_report_pdf.css"/>',
+            f"<style>\n{css_content}\n</style>",
+        )
+
+    return _write_html_to_pdf(html, pdf_path)
+
+
+# =============================================================================
+# New Poster & Report APIs
+# =============================================================================
+
+def export_poster_pdf(
+    signal: dict,
+    report: dict,
+    output_path: str | Path,
+    market_data: Optional[dict] = None,
+    watchlist_entry: Optional[dict] = None,
+    validation_result: Optional[dict] = None,
+    position_decision: Optional[Any] = None,
+    instrument_rec: Optional[Any] = None,
+    options_structure: Optional[Any] = None,
+    early_exit_plan: Optional[Any] = None,
+) -> Path:
+    """
+    Export a single-ticker decision poster as a PDF document.
+
+    This generates the Boss Poster - a single-page decision board with:
+    - TOP ZONE: Action, Size, Target, Ticker, Conviction, Why Now, Risks
+    - MIDDLE ZONE: KPIs, Thesis, Technical, Instrument Choice, Options
+    - BOTTOM ZONE: Watchlist State, Validation Summary
+
+    Args:
+        signal: Canonical signal dict with ticker, rating, confidence, entry_price, etc.
+        report: Canonical report dict with bottom_line, why_now, bull_case, risk_watch, trade_plan, etc.
+        output_path: Output path for the PDF file.
+        market_data: Optional dict with current price, P/E, EPS growth, analyst rating.
+        watchlist_entry: Optional watchlist entry dict.
+        validation_result: Optional validation result dict.
+        position_decision: Optional PositionDecisionCard dataclass with primary_action, conviction, etc.
+        instrument_rec: Optional InstrumentRecommendation dataclass with ranked_alternatives.
+        options_structure: Optional OptionsStructure dataclass with primary_contract details.
+        early_exit_plan: Optional EarlyExitPlan dataclass with exit zones.
+
+    Returns:
+        Path to the exported PDF file.
+    """
+    from agent.research_v1.report_templates.renderer import render_boss_poster
+
+    pdf_path = Path(output_path).expanduser().resolve()
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Inline CSS into HTML for standalone rendering
+    template_dir = Path(__file__).parent / "report_templates"
+    css_path = template_dir / "boss_report_pdf.css"
+    if css_path.exists():
+        css_content = css_path.read_text(encoding="utf-8")
+    else:
+        css_content = ""
+
+    html = render_boss_poster(
+        signal=signal,
+        report=report,
+        market_data=market_data,
+        watchlist_entry=watchlist_entry,
+        validation_result=validation_result,
+        position_decision=position_decision,
+        instrument_rec=instrument_rec,
+        options_structure=options_structure,
+        early_exit_plan=early_exit_plan,
+    )
+
+    # Inject CSS inline for standalone HTML
+    if css_content and "<link rel=" in html:
+        html = html.replace(
+            '<link rel="stylesheet" href="boss_report_pdf.css"/>',
+            f'<style>\n{css_content}\n</style>'
+        )
+
+    return _write_html_to_pdf(html, pdf_path)
+
+
+def export_batch_report_pdf(
+    batch_items: list[dict],
+    company_reports: list[dict],
+    output_path: str | Path,
+    watchlist_entries: Optional[list[dict]] = None,
+    validation_results: Optional[list[dict]] = None,
+    executive_summary: str = "",
+) -> Path:
+    """
+    Export a multi-ticker batch report as a PDF document.
+
+    This generates the Boss Report - a multi-page executive report with:
+    - PAGE 1: Batch overview table + executive summary
+    - PAGES 2+: Individual company reports (one per ticker)
+    - FINAL PAGE: Watchlist state + validation summary
+
+    Args:
+        batch_items: List of research batch item dicts.
+        company_reports: List of company report dicts.
+        output_path: Output path for the PDF file.
+        watchlist_entries: Optional list of watchlist entry dicts.
+        validation_results: Optional list of validation result dicts.
+        executive_summary: Optional executive summary text.
+
+    Returns:
+        Path to the exported PDF file.
+    """
+    from agent.research_v1.report_templates.renderer import render_batch_report
+
+    pdf_path = Path(output_path).expanduser().resolve()
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Inline CSS into HTML for standalone rendering
+    template_dir = Path(__file__).parent / "report_templates"
+    css_path = template_dir / "boss_report_pdf.css"
+    if css_path.exists():
+        css_content = css_path.read_text(encoding="utf-8")
+    else:
+        css_content = ""
+
+    html = render_batch_report(
+        batch_items=batch_items,
+        company_reports=company_reports,
+        watchlist_entries=watchlist_entries,
+        validation_results=validation_results,
+        executive_summary=executive_summary,
+    )
+
+    # Inject CSS inline for standalone HTML
+    if css_content and "<link rel=" in html:
+        html = html.replace(
+            '<link rel="stylesheet" href="boss_report_pdf.css"/>',
+            f'<style>\n{css_content}\n</style>'
+        )
+
+    return _write_html_to_pdf(html, pdf_path)
+

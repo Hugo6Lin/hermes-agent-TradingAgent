@@ -1,0 +1,1363 @@
+/* ==========================================================================
+   Hermes Boss Report CSS - Print-Optimized
+   Color System: orange-red (#E85A3C) + teal-green (#2DD4A8) + warm off-white
+   ========================================================================== */
+
+:root {
+  /* Primary Colors */
+  --color-action: #E85A3C;      /* Orange-red: primary action, emphasis */
+  --color-positive: #2DD4A8;     /* Teal-green: conviction, support indicators */
+  --color-risk: #C0392B;        /* Deep red: risk chips only */
+
+  /* Backgrounds */
+  --color-bg: #FAF8F5;          /* Warm off-white main background */
+  --color-panel: #FFFFFF;        /* White card backgrounds */
+  --color-header: #1C1C1E;       /* Deep charcoal for header panels */
+  --color-footer: #1C1C1E;      /* Footer bar */
+  --color-footer-light: #F0F0F0; /* Light gray for bottom zone */
+
+  /* Text */
+  --color-text: #1A1A1A;         /* Deep neutral text */
+  --color-text-secondary: #6B7280; /* Gray secondary text */
+  --color-text-inverse: #FFFFFF;  /* White text on dark backgrounds */
+
+  /* Borders & Dividers */
+  --color-border: #E5E5E5;
+  --color-card-border: #D1D5DB;
+  --color-kpi-border: #2DD4A8;   /* Teal top border for KPI cards */
+
+  /* Typography */
+  --font-main: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-numbers: "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", "Consolas", monospace;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-section: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+/* ==========================================================================
+   BASE RESET & PRINT SETUP
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 14px;
+}
+
+body {
+  font-family: var(--font-main);
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
+/* ==========================================================================
+   POSTER TEMPLATE (.poster)
+   Aspect ratio: 3:4 (A4-like)
+   ========================================================================== */
+
+.poster {
+  width: 210mm;
+  height: 280mm;
+  /* height: 297mm; */  /* Uncomment for exact A4 */
+  overflow: hidden;
+  position: relative;
+  background: var(--color-bg);
+}
+
+/* ==========================================================================
+   TOP ZONE - Decision Hero (55% height, per spec Section 五)
+   ========================================================================== */
+
+.poster-header {
+  height: 55%;
+  background: var(--color-header);
+  color: var(--color-text-inverse);
+  padding: var(--space-lg);
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  grid-template-rows: auto 1fr auto;
+  gap: var(--space-md);
+  position: relative;
+}
+
+/* Action Block - Left side, dominant */
+.action-block {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-right: var(--space-lg);
+}
+
+.action-label {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.action-label-zh {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-action);
+  margin-bottom: var(--space-xs);
+}
+
+.action-main {
+  font-size: 56px;
+  font-weight: 800;
+  color: var(--color-action);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin-bottom: var(--space-sm);
+}
+
+.action-sub {
+  font-size: 28px;
+  font-weight: 300;
+  color: var(--color-text-inverse);
+  opacity: 0.9;
+  margin-bottom: var(--space-lg);
+}
+
+.size-target-block {
+  margin-top: var(--space-md);
+}
+
+.size-line, .target-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.size-label, .target-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.size-label-zh, .target-label-zh {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-inverse);
+}
+
+.size-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--color-text-inverse);
+}
+
+.target-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--color-positive);
+}
+
+/* Ticker & Conviction Block - Right side */
+.ticker-block {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-top: var(--space-sm);
+}
+
+.ticker-symbol {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--color-text-inverse);
+  letter-spacing: 0.02em;
+}
+
+.ticker-company {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+
+.conviction-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 4px 12px;
+  border: 2px solid var(--color-positive);
+  border-radius: 4px;
+  margin-top: var(--space-sm);
+}
+
+.conviction-badge-zh {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-positive);
+}
+
+.conviction-badge-en {
+  font-size: 10px;
+  color: var(--color-positive);
+  opacity: 0.8;
+}
+
+/* Why Now - Right side middle */
+.why-now {
+  grid-column: 2;
+  grid-row: 2;
+  padding-top: var(--space-md);
+}
+
+.why-now-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-sm);
+}
+
+.why-now-label-zh {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-inverse);
+}
+
+.why-now-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.why-now-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  font-size: 12px;
+  color: var(--color-text-inverse);
+  line-height: 1.4;
+}
+
+.why-now-item::before {
+  content: "•";
+  color: var(--color-action);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.why-now-item-en {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  display: block;
+  margin-top: 1px;
+}
+
+/* Risk Chips - Bottom of header */
+.risk-chips {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  display: flex;
+  gap: var(--space-sm);
+  padding-top: var(--space-md);
+  border-top: 1px solid rgba(255,255,255,0.1);
+  margin-top: auto;
+}
+
+.risk-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: rgba(192, 57, 43, 0.2);
+  border: 1px solid var(--color-risk);
+  border-radius: 3px;
+  font-size: 11px;
+  color: #FFB3B3;
+}
+
+.risk-chip-zh {
+  font-weight: 600;
+  color: #FFB3B3;
+}
+
+.risk-chip-en {
+  font-size: 9px;
+  color: #FF9999;
+  opacity: 0.8;
+}
+
+/* ==========================================================================
+   MIDDLE ZONE (35% height, per spec Section 五)
+   ========================================================================== */
+
+.poster-body {
+  height: 35%;
+  padding: var(--space-md) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  background: var(--color-bg);
+}
+
+/* KPI Cards Grid */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-sm);
+}
+
+.kpi-card {
+  background: var(--color-panel);
+  border-top: 3px solid var(--color-kpi-border);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+  box-shadow: var(--shadow-card);
+}
+
+.kpi-label {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.05em;
+}
+
+.kpi-label-zh {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.kpi-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-top: 2px;
+  font-family: var(--font-numbers);
+}
+
+.kpi-value.action {
+  color: var(--color-action);
+}
+
+.kpi-value.positive {
+  color: var(--color-positive);
+}
+
+/* Thesis & Technical Columns */
+.thesis-technical {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: var(--space-sm);
+  flex: 1;
+}
+
+.section-card {
+  background: var(--color-panel);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+  box-shadow: var(--shadow-card);
+}
+
+.section-label {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.section-label-zh {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.section-label-zh::before {
+  content: "";
+  width: 3px;
+  height: 12px;
+  background: var(--color-action);
+  border-radius: 2px;
+}
+
+.section-content {
+  font-size: 11px;
+  color: var(--color-text);
+  line-height: 1.5;
+  margin-top: var(--space-xs);
+}
+
+.section-bullets {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.section-bullet {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.section-bullet::before {
+  content: attr(data-num);
+  width: 14px;
+  height: 14px;
+  background: var(--color-action);
+  color: white;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.section-bullet-en {
+  font-size: 9px;
+  color: var(--color-text-secondary);
+  display: block;
+  margin-top: 1px;
+  margin-left: 20px;
+}
+
+/* Instrument Choice Row — 3 boxes: primary / conservative / alternative */
+.instrument-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-xs);
+}
+
+.instrument-box {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: var(--space-sm);
+  text-align: center;
+}
+
+.instrument-box.primary {
+  border-color: var(--color-action);
+  background: rgba(232, 90, 60, 0.05);
+}
+
+.instrument-box.conservative {
+  border-color: var(--color-positive);
+  background: rgba(45, 212, 168, 0.05);
+}
+
+.instrument-box.alternative {
+  border-color: var(--color-text-secondary);
+}
+
+.instrument-name-zh {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.instrument-name-en {
+  font-size: 9px;
+  color: var(--color-text-secondary);
+}
+
+.instrument-rec {
+  font-size: 10px;
+  color: var(--color-text);
+  margin-top: 4px;
+}
+
+/* Options Structure Card — expanded to 9 columns for full options detail */
+.options-card {
+  background: var(--color-panel);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+  box-shadow: var(--shadow-card);
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.options-label {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.options-label-zh {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.options-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  font-family: var(--font-numbers);
+}
+
+/* ==========================================================================
+   BOTTOM ZONE (10% height)
+   ========================================================================== */
+
+.poster-footer {
+  height: 10%;
+  background: var(--color-footer-light);
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-sm) var(--space-lg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Early Exit Zones (Phase 15 — per spec Section 五.5.2) */
+.early-exit-section {
+  background: rgba(45, 212, 168, 0.05);
+  border: 1px solid rgba(45, 212, 168, 0.2);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+}
+
+.early-exit-section .section-label-zh {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-positive);
+  margin-bottom: var(--space-xs);
+}
+
+.early-exit-zones {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-sm);
+}
+
+.early-exit-zone {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 2px 6px;
+  font-size: 10px;
+}
+
+.ee-zone-name {
+  font-weight: 700;
+  color: var(--color-text);
+  font-size: 11px;
+}
+
+.ee-zone-action {
+  color: var(--color-action);
+  font-weight: 600;
+  font-size: 11px;
+  text-align: right;
+}
+
+.ee-zone-trigger {
+  font-size: 9px;
+  color: var(--color-text-secondary);
+  grid-column: 1;
+}
+
+.ee-zone-return {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-positive);
+  text-align: right;
+  font-family: var(--font-numbers);
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.footer-label {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.footer-label-zh {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.status-badge.held {
+  background: rgba(45, 212, 168, 0.15);
+  color: #1A9A7A;
+}
+
+.status-badge.high-priority {
+  background: rgba(232, 90, 60, 0.15);
+  color: var(--color-action);
+}
+
+.status-badge.research {
+  background: rgba(232, 180, 60, 0.15);
+  color: #B8860B;
+}
+
+.status-badge.passive {
+  background: rgba(107, 114, 128, 0.1);
+  color: var(--color-text-secondary);
+}
+
+.validation-chips {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.validation-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.validation-chip-label {
+  color: var(--color-text-secondary);
+}
+
+.validation-chip-value {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.validation-chip-value.high {
+  color: var(--color-positive);
+}
+
+.validation-chip-value.medium {
+  color: var(--color-action);
+}
+
+.footer-brand {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  text-align: right;
+}
+
+.footer-brand-zh {
+  font-size: 11px;
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   REPORT TEMPLATE (Multi-page, multi-section)
+   ========================================================================== */
+
+.report {
+  width: 210mm;
+  min-height: 297mm;
+  background: var(--color-bg);
+}
+
+.report-page {
+  width: 210mm;
+  min-height: 277mm;
+  padding: var(--space-lg);
+  page-break-after: always;
+  background: var(--color-bg);
+}
+
+.report-page:last-child {
+  page-break-after: auto;
+}
+
+/* Report Header */
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: var(--space-md);
+  border-bottom: 2px solid var(--color-header);
+  margin-bottom: var(--space-lg);
+}
+
+.report-title-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.report-title-zh {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.report-title-en {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+
+.report-meta {
+  text-align: right;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.report-meta-value {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Report Section */
+.report-section {
+  margin-bottom: var(--space-lg);
+}
+
+.report-section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.report-section-title-zh {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.report-section-title-en {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* Batch Overview Table */
+.batch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.batch-table th {
+  text-align: left;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-header);
+  color: var(--color-text-inverse);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.batch-table th .zh {
+  font-weight: 700;
+}
+
+.batch-table td {
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.batch-table tr:nth-child(even) td {
+  background: rgba(0,0,0,0.02);
+}
+
+.batch-ticker {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.batch-rating {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.batch-rating.buy {
+  background: rgba(45, 212, 168, 0.15);
+  color: #1A9A7A;
+}
+
+.batch-rating.outperform {
+  background: rgba(45, 212, 168, 0.15);
+  color: #1A9A7A;
+}
+
+.batch-rating.hold {
+  background: rgba(180, 134, 60, 0.15);
+  color: #8B6914;
+}
+
+.batch-rating.underperform {
+  background: rgba(192, 57, 43, 0.15);
+  color: var(--color-risk);
+}
+
+/* Company Report Card */
+.company-report {
+  background: var(--color-panel);
+  border: 1px solid var(--color-card-border);
+  border-radius: 6px;
+  padding: var(--space-lg);
+  margin-bottom: var(--space-lg);
+  box-shadow: var(--shadow-section);
+}
+
+.company-report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.company-report-ticker {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--color-action);
+}
+
+.company-report-company {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+
+.company-report-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.company-report-rating {
+  font-size: 14px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 4px;
+}
+
+.company-report-confidence {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+/* =============================================================================
+   COMPANY REPORT — DECISION-OBJECT-FIRST (PDF Pages 2+, per spec Section 六)
+   ============================================================================= */
+
+/* Company report page wrapper — page-break-inside: avoid */
+.company-report-page {
+  page-break-inside: avoid;
+}
+
+/* Section 1: Decision Card Summary — dark header box */
+.decision-card-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--color-header);
+  color: var(--color-text-inverse);
+  padding: var(--space-lg);
+  border-radius: 6px;
+  margin-bottom: var(--space-lg);
+}
+
+.decision-card-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.decision-action-zh {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--color-action);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.decision-action-en {
+  font-size: 20px;
+  font-weight: 300;
+  color: var(--color-text-inverse);
+  opacity: 0.9;
+}
+
+.decision-conviction {
+  margin-top: var(--space-sm);
+}
+
+.conviction-badge-zh {
+  display: inline-block;
+  padding: 2px 10px;
+  background: rgba(232, 90, 60, 0.2);
+  color: #FFAA90;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.conviction-badge-en {
+  display: inline-block;
+  padding: 2px 10px;
+  background: rgba(232, 90, 60, 0.2);
+  color: #FFAA90;
+  border-radius: 3px;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.decision-card-right {
+  text-align: right;
+}
+
+.decision-ticker {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--color-text-inverse);
+  line-height: 1;
+}
+
+.decision-company {
+  font-size: 14px;
+  color: rgba(255,255,255,0.7);
+  margin-top: 4px;
+}
+
+/* Section 2: Instrument Detail — 3 boxes */
+.instrument-detail-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.instrument-detail-box {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.instrument-detail-box.primary {
+  border-color: var(--color-action);
+  background: rgba(232, 90, 60, 0.04);
+}
+
+.instrument-detail-box.conservative {
+  border-color: var(--color-positive);
+  background: rgba(45, 212, 168, 0.04);
+}
+
+.instrument-detail-box.alternative {
+  border-color: var(--color-text-secondary);
+}
+
+.instrument-detail-role {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.instrument-detail-name-zh {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.instrument-detail-name-en {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.instrument-detail-reason {
+  font-size: 11px;
+  color: var(--color-text);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* Section 3: Options Detail Grid */
+.options-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.options-detail-item {
+  text-align: center;
+}
+
+.options-detail-label-zh {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 2px;
+}
+
+.options-detail-label {
+  font-size: 9px;
+  color: var(--color-text-secondary);
+}
+
+.options-detail-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  font-family: var(--font-numbers);
+}
+
+.options-detail-value.positive {
+  color: var(--color-positive);
+}
+
+.options-detail-value.negative {
+  color: var(--color-risk);
+}
+
+/* Early Exit Summary inside company report */
+.early-exit-summary {
+  background: rgba(45, 212, 168, 0.05);
+  border: 1px solid rgba(45, 212, 168, 0.2);
+  border-radius: 4px;
+  padding: var(--space-sm) var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.ee-summary-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-positive);
+  margin-bottom: var(--space-xs);
+}
+
+.ee-summary-zones {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-sm);
+}
+
+.ee-summary-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+}
+
+.ee-summary-zone .ee-zone-name {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.ee-summary-zone .ee-zone-action {
+  color: var(--color-action);
+  font-weight: 600;
+  text-align: left;
+}
+
+.ee-summary-zone .ee-zone-trigger {
+  font-size: 9px;
+  color: var(--color-text-secondary);
+}
+
+.ee-summary-zone .ee-zone-return {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-positive);
+  text-align: left;
+}
+
+/* Section 4: Supporting Data Grid — explicitly supporting-only */
+.supporting-only {
+  opacity: 0.75;
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+  padding: var(--space-md);
+}
+
+.supporting-only-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.supporting-disclaimer {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  font-style: italic;
+  margin-left: auto;
+}
+
+.supporting-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-md);
+}
+
+.supporting-grid-item {
+  text-align: center;
+  padding: var(--space-sm);
+  background: var(--color-bg);
+  border-radius: 4px;
+}
+
+.supporting-grid-label-zh {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 2px;
+}
+
+.supporting-grid-label {
+  font-size: 9px;
+  color: var(--color-text-secondary);
+}
+
+.supporting-grid-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+  font-family: var(--font-numbers);
+  margin-top: 4px;
+}
+
+.supporting-grid-value.positive {
+  color: var(--color-positive);
+}
+
+.supporting-grid-value.negative {
+  color: var(--color-risk);
+}
+
+/* Section text and risk list */
+.section-text {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-text);
+}
+
+.risk-list {
+  font-size: 12px;
+  line-height: 1.8;
+  padding-left: var(--space-lg);
+  color: var(--color-text);
+}
+
+/* Bottom Line Box */
+.bottom-line-box {
+  background: var(--color-header);
+  color: var(--color-text-inverse);
+  padding: var(--space-md);
+  border-radius: 4px;
+  margin-bottom: var(--space-md);
+}
+
+.bottom-line-label {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.bottom-line-label-zh {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-action);
+}
+
+.bottom-line-text {
+  font-size: 14px;
+  color: var(--color-text-inverse);
+  line-height: 1.6;
+}
+
+/* Trade Plan Grid */
+.trade-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.trade-plan-item {
+  text-align: center;
+  padding: var(--space-md);
+  background: var(--color-bg);
+  border-radius: 4px;
+}
+
+.trade-plan-item-label {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.trade-plan-item-label-zh {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.trade-plan-item-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text);
+  font-family: var(--font-numbers);
+}
+
+.trade-plan-item-value.action {
+  color: var(--color-action);
+}
+
+.trade-plan-item-value.positive {
+  color: var(--color-positive);
+}
+
+/* Two Column Layout */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-lg);
+}
+
+.thesis-block, .risk-block {
+  background: var(--color-panel);
+  border: 1px solid var(--color-card-border);
+  border-radius: 4px;
+  padding: var(--space-md);
+}
+
+.thesis-block h4, .risk-block h4 {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: var(--space-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.thesis-block h4 {
+  color: var(--color-positive);
+}
+
+.risk-block h4 {
+  color: var(--color-risk);
+}
+
+.thesis-block p, .risk-block p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text);
+}
+
+/* ==========================================================================
+   PRINT OPTIMIZATIONS
+   ========================================================================== */
+
+@media print {
+  html {
+    font-size: 13px;
+  }
+
+  .poster, .report, .report-page {
+    width: 100%;
+    height: auto;
+  }
+
+  .report-page {
+    min-height: auto;
+    padding: 15mm;
+  }
+
+  .poster {
+    height: auto;
+    aspect-ratio: 3/4;
+  }
+
+  .poster-header {
+    height: auto;
+    min-height: 60%;
+  }
+
+  .poster-body {
+    height: auto;
+  }
+
+  .poster-footer {
+    height: auto;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* ==========================================================================
+   EMPTY STATE
+   ========================================================================== */
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+
+.empty-state-zh {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
