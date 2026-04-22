@@ -1,333 +1,330 @@
-# Hermes Report UI Design Spec
+# Hermes 报告界面设计规范
 
-**Date:** 2026-04-22
-**Phase:** Report UI Redesign
-**Status:** Draft
-
----
-
-## 1. Purpose
-
-### What This Report UI Is For
-
-The Hermes Report UI is the primary artifact surface through which the boss makes investment decisions. It translates the full bullish decision pipeline — thesis evaluation, instrument selection, options structuring, early exit planning, watchlist monitoring, and validation — into a format the boss can read in two modes:
-
-- **Poster view**: single-page decision board, optimized for quick 3-second comprehension and printing on a single A4/Letter sheet
-- **PDF report view**: multi-page executive report, optimized for archival and committee distribution
-
-### Who Reads It
-
-- **Primary**: Boss / investment committee chair — reads only the poster
-- **Secondary**: Operator or analyst — may read the full PDF report for research depth
-
-### Why Poster + PDF Rather Than Slide Deck
-
-Slides are wrong because:
-
-- slides imply presentation mode (someone presenting to the boss)
-- slides encourage too much content per page
-- slides do not print predictably
-- slides are not archival documents
-
-Poster + PDF is correct because:
-
-- poster gives the boss a single fixed decision card — no navigation required
-- PDF gives the committee a paginated archival record with full depth
-- both are printable and do not require special software to render
-- both are deterministic — same content every time
+**日期：** 2026-04-22
+**阶段：** 报告界面重新设计
+**状态：** 修订版
 
 ---
 
-## 2. Audience
+## 一、目的
 
-### Boss / Investment Committee
+### 1.1 本报告界面用途
 
-**In 3 seconds**, the reader must understand:
+Hermes 报告界面是 boss 做出投资决策的核心产物表面。它将完整的牛市决策流程——标的研究、工具选择、期权结构、早期退出计划、监控列表、验证评估——转化为两种阅读模式：
 
-- What is the action? (buy stock / buy call / bull call spread / sell put / covered call / watchlist)
-- What is the conviction? (high / medium / low)
-- What is the ticker?
-- What is the target price and window?
-- What is the single most important reason to act now?
+- **海报视图**：单页决策看板，优先保证 3 秒内理解完整决策，支持打印在单张 A4/Letter 纸上
+- **PDF 报告视图**：多页 executive 报告，优先保证存档和投委会分发
 
-**In 30–60 seconds**, the reader can go deeper and understand:
+### 1.2 目标读者
 
-- Why this instrument was chosen over alternatives
-- What the options structure looks like (if applicable)
-- What the early exit plan looks like
-- What the key risks are
-- What the watchlist and validation status are
+- **主要读者**：boss / 投委会主任 — 仅阅读海报即可
+- **次要读者**：操作员或分析师 — 可阅读完整 PDF 报告以了解研究深度
 
-**Beyond 60 seconds** is out of scope for this surface. Deep research belongs in the analyst-level view.
+### 1.3 为何是海报 + PDF 而非幻灯片
 
----
+幻灯片不适用，原因如下：
 
-## 3. Design Principles
+- 幻灯片暗示演示模式（有人向 boss 做汇报）
+- 幻灯片每页内容过多
+- 幻灯片打印效果不可控
+- 幻灯片不适合存档
 
-### 3.1 Decision-First Hierarchy
+海报 + PDF 是正确选择，原因如下：
 
-The most important information comes first, in the highest visual priority position. The information hierarchy is:
-
-1. **Action + Conviction** — dominant visual element
-2. **Ticker + Company**
-3. **Target Price + Window**
-4. **Why Now** (top 3 bullets)
-5. **KPI Snapshot** (price, P/E, EPS growth, analyst rating)
-6. **Thesis & Catalysts**
-7. **Technical Summary**
-8. **Instrument Choice** (primary + conservative + alternative)
-9. **Options Structure** (if applicable)
-10. **Early Exit Zones** (if applicable)
-11. **Risk Chips**
-12. **Watchlist State**
-13. **Validation Summary**
-
-### 3.2 Chinese-First Bilingual
-
-- All section labels use Chinese as the primary text
-- English translations appear as secondary labels on the same element
-- The pattern is always: `中文 / English`
-- No section uses English-only labels in the primary view
-- No mojibake — all strings are defined in `strings_zh.py` and `strings_en.py` with strict one-to-one mapping
-
-### 3.3 Printable Executive Brief
-
-- Both poster and PDF must render correctly when printed from a standard browser
-- Colors must not disappear when printing (use `print-color-adjust: exact`)
-- Text must not overflow page boundaries
-- The poster must fit on a single A4 or Letter page without scrolling
-- The PDF must paginate cleanly with `page-break-*` rules
-
-### 3.4 Premium Institutional Tone
-
-- No clip-art, no cartoons, no playful illustrations
-- Clean grid layouts with clear section boundaries
-- Color semantics: orange-red = action/alert, teal-green = positive/conviction, deep red = risk only
-- Typography: clean sans-serif with clear size hierarchy (large action text, smaller body text)
-- No raw data dumps — every number displayed must have a label
-
-### 3.5 Compact Monitoring Support
-
-- The poster footer (bottom zone) must show watchlist state and validation at a glance
-- The PDF final page must show the full watchlist table and validation table
-- These must be readable even when many entries are present
-
-### 3.6 No Raw Database Dump Feel
-
-- Every table row must have meaningful labels
-- Empty fields show em-dash `—` not blank
-- Dates use YYYY-MM-DD format
-- Percentages use `XX%` notation, not decimals
+- 海报给 boss 一张固定的决策卡——无需导航
+- PDF 给投委会提供带完整深度的分页存档记录
+- 两者均可打印，且无需特殊软件即可正确渲染
+- 两者每次输出内容一致
 
 ---
 
-## 4. Poster Structure
+## 二、目标读者要求
 
-The poster is a single A4/Letter page divided into three visual zones.
+### Boss / 投委会
 
-### Zone 1 — Decision Hero (top ~55%)
+**3 秒内**，读者必须理解：
 
-Role: Contains all the information needed for a 3-second decision.
+- 操作是什么？（买入股票 / 买入看涨 / 牛市看涨价差 / 卖出备兑看跌 / 备兑看涨 / 观望）
+- 信心度是什么？（高信心 / 中信心 / 低信心）
+- 标的是什么？（代码 + 公司名）
+- 目标价和目标窗口是什么？
+- 为何现在行动的最核心原因是什么？
 
-Sub-sections (left-to-right, top-to-bottom):
+**30–60 秒内**，读者可深入理解：
 
-1. **Action Block** (left, dominant)
-   - Section label: `操作 / Action`
-   - Large Chinese action text: e.g., `买入看涨`
-   - Smaller English action: e.g., `Buy Call`
-   - Conviction badge below: e.g., `高信心 / HIGH CONVICTION`
+- 为何选择该工具而非其他备选方案
+- 期权结构是什么（如适用）
+- 早期退出计划是什么
+- 主要风险是什么
+- 监控状态和验证结论是什么
 
-2. **Ticker + Conviction Block** (right, top)
-   - Ticker symbol in large text: e.g., `NVDA`
-   - Company name below in smaller text
-   - Conviction badge: colored border badge
+**超过 60 秒的内容不在本表面范围。** 深度研究内容属于分析师级视图。
 
-3. **Target + Size Block** (right, middle)
-   - `目标窗口 / Target Window`: e.g., `12个月`
-   - `目标价 / Target Price`: e.g., `$180 → $250`
-   - `建议仓位 / Suggested Size`: e.g., `15% Portfolio`
+---
 
-4. **Why Now** (right, lower)
-   - Section label: `为何此时 / Why Now`
-   - Up to 3 numbered bullet points
-   - Each bullet has Chinese primary + English secondary
+## 三、设计原则
 
-5. **Risk Chips** (bottom of zone 1, full width)
-   - Horizontal row of risk chips
-   - Each chip: Chinese risk label + English secondary
-   - Background: semi-transparent deep red
+### 3.1 决策优先的信息层级
 
-### Zone 2 — Detail Cards (middle ~35%)
+最重要的信息放在最优先的视觉位置。信息层级顺序如下：
 
-Role: Contains the analytical depth for a 30-second read.
+1. **操作 + 信心度** — 最主导的视觉元素
+2. **代码 + 公司名**
+3. **目标价 + 目标窗口**
+4. **为何此时**（前 3 条）
+5. **KPI 快照**（当前价、市盈率、EPS 增长、分析师评级）
+6. **投资逻辑 + 催化剂**
+7. **技术面摘要**
+8. **工具选择**（首选 + 保守方案 + 备选方案）
+9. **期权结构**（如适用）
+10. **早期退出区间**（如适用）
+11. **风险标签**
+12. **监控状态**
+13. **验证摘要**
 
-Sub-sections:
+### 3.2 中文优先的双语规则
 
-1. **KPI Cards** (4-column grid)
+- 所有区块标签以中文为主文本
+- 英文翻译作为次要标签显示在同一元素上
+- 所有标签均遵循 `中文 / English` 模式
+- 主视图中无英文-only 标签
+- 无乱码——所有字符串均定义在 `strings_zh.py` 和 `strings_en.py` 中，保持严格一一映射
+
+### 3.3 可打印的 Executive 摘要风格
+
+- 海报和 PDF 在标准浏览器打印时渲染正确
+- 打印时颜色不丢失（使用 `print-color-adjust: exact`）
+- 文字不超出页面边界
+- 海报可在单张 A4 或 Letter 纸上完整打印
+- PDF 分页规则正确（使用 `page-break-*`）
+
+### 3.4 优质机构风格
+
+- 无剪贴画、无卡通、无轻浮插图
+- 清晰网格布局，区块边界分明
+- 颜色语义：橙红色 = 操作/警示，青绿色 = 信心/支撑，深红色 = 纯风险标签
+- 排版：清晰无衬线字体的尺寸层级（大操作文字、小正文）
+- 无原始数据转储——每个显示数字均有标签
+
+### 3.5 紧凑监控支持
+
+- 海报页脚（底部区块）概览监控状态和验证，一目了然
+- PDF 末页显示完整监控列表和验证表格
+- 条目多时仍可阅读
+
+### 3.6 无原始数据库转储感
+
+- 每个表格行均有有意义的标签
+- 空字段显示破折号 `—` 而非空白
+- 日期使用 `YYYY-MM-DD` 格式
+- 百分比使用 `XX%` 格式，非小数
+
+---
+
+## 四、海报结构
+
+海报为单张 A4/Letter 纸，分为三个视觉区块。
+
+### 区块一 — 决策主角（顶部约 55%）
+
+作用：包含 3 秒决策所需的全部信息。
+
+子区块（从左到右、从上到下）：
+
+1. **操作区块**（左侧，主导）
+   - 区块标签：`操作 / Action`
+   - 大号中文操作文字：如 `买入看涨`
+   - 小号英文操作文字：如 `Buy Call`
+   - 下方信心徽章：如 `高信心 / HIGH CONVICTION`
+
+2. **代码 + 信心区块**（右侧，顶部）
+   - 大号代码符号：如 `NVDA`
+   - 下方公司名（小号文字）
+
+3. **目标 + 仓位区块**（右侧，中部）
+   - `目标窗口 / Target Window`：如 `12个月`
+   - `目标价 / Target Price`：如 `$180 → $250`
+   - `建议仓位 / Suggested Size`：如 `15% Portfolio`
+
+4. **为何此时**（右侧，中下）
+   - 区块标签：`为何此时 / Why Now`
+   - 最多 3 条编号要点
+   - 每条要点有中文主文字 + 英文次要文字
+
+5. **风险标签行**（区块一底部，全宽）
+   - 水平排列的风险标签行
+   - 每个标签：中文风险主文字 + 英文次要文字
+   - 背景：半透明深红色
+
+### 区块二 — 详情卡片（中层约 35%）
+
+作用：包含 30 秒阅读所需的分析深度。
+
+子区块：
+
+1. **KPI 卡片**（4 列网格）
    - `当前价 / Price`
    - `市盈率 / P/E`
    - `EPS增长 / EPS Growth`
    - `分析师评级 / Analyst Rating`
 
-2. **Thesis + Technical** (2-column layout)
-   - Left: `投资逻辑 / Thesis & Catalysts` — up to 4 numbered bullets
-   - Right: `技术分析 / Technical Analysis` — support, resistance, trend summary
+2. **投资逻辑 + 技术面**（2 列布局）
+   - 左：`投资逻辑 / Thesis & Catalysts` — 最多 4 条编号要点
+   - 右：`技术分析 / Technical Analysis` — 支撑位、阻力位、趋势摘要
 
-3. **Instrument Choice** (5-column horizontal row)
-   - Each box shows one instrument type
-   - Role labels: `首选 / PRIMARY`, `保守方案 / CONSERVATIVE`, `备选方案 / ALTERNATIVE`, `—` for rejected
-   - Only 3 instruments shown (primary + conservative + alternative), not all 5
+3. **工具选择**（5 列水平排列）
+   - 每个格子显示一种工具类型
+   - 角色标签：`首选 / PRIMARY`、`保守方案 / CONSERVATIVE`、`备选方案 / ALTERNATIVE`、空白为已拒绝
+   - 仅显示 3 种工具（首选 + 保守 + 备选），不显示全部 5 种
 
-4. **Options Structure** (single compact card, shown only when options are applicable)
-   - Fields: `到期日 / Expiry`, `行权价 / Strike`, `盈亏平衡 / Break-Even`, `Delta / Delta`, `提前退出 / Early Exit`
-   - 5-column layout within one card
+4. **期权结构**（单个紧凑卡片，仅在适用时显示）
+   - 字段：`到期日 / Expiry`、`行权价 / Strike`、`盈亏平衡 / Break-Even`、`Delta / Delta`、`提前退出 / Early Exit`
+   - 5 列布局
 
-5. **Early Exit** (shown only when EarlyExitPlan is present)
-   - Three zones displayed: `首轮减仓 / First Trim`, `主要利润 / Main Profit`, `完全退出 / Full Exit`
-   - Each zone: action + trigger condition + target return
+5. **早期退出**（EarlyExitPlan 存在时显示）
+   - 三个区间：`首轮减仓 / First Trim`、`主要利润 / Main Profit`、`完全退出 / Full Exit`
+   - 每个区间：操作 + 触发条件 + 目标收益率
 
-### Zone 3 — Status Footer (bottom ~10%)
+### 区块三 — 状态页脚（底部约 10%）
 
-Role: Contains monitoring context — lightweight but always present.
+作用：包含监控上下文——轻量但始终显示。
 
-Sub-sections:
+子区块：
 
-1. **Watchlist State** (left)
-   - Status badge: `持仓中 / Held` | `重点关注 / High Priority` | `研究进行中 / Research` | `被动跟踪 / Passive`
-   - `操作倾向 / Action Bias` label and value
+1. **监控状态**（左侧）
+   - 状态徽章：`持仓中 / Held` | `重点关注 / High Priority` | `研究进行中 / Research` | `被动跟踪 / Passive`
+   - `操作倾向 / Action Bias` 标签和值
 
-2. **Validation Summary** (center)
-   - `市场状态 / Regime`: e.g., `趋势向上 / Trend Up`
-   - `验证信心 / Validation Confidence`: e.g., `78%`
-   - Color-coded: high = teal-green, medium = orange-red
+2. **验证摘要**（中间）
+   - `市场状态 / Regime`：如 `趋势向上 / Trend Up`
+   - `验证信心 / Validation Confidence`：如 `78%`
+   - 颜色编码：高 = 青绿色，中 = 橙红色
 
-3. **Brand + Timestamp** (right)
+3. **品牌 + 时间戳**（右侧）
    - `Hermes 研究台 / Hermes Research Desk`
    - `决策看板 / Decision Board`
-   - Generated timestamp: `YYYY-MM-DD HH:MM`
+   - 生成时间戳：`YYYY-MM-DD HH:MM`
 
 ---
 
-## 5. Printable Report Structure
+## 五、PDF 报告结构
 
-The PDF report is a multi-page document.
+PDF 报告为多页文档。
 
-### Page 1 — Batch Overview
+### 第 1 页 — 批次总览
 
-- Report header: `批次总览 / Batch Overview` + date + count
-- Batch overview table with columns: Rank, Ticker, Company, Rating, Confidence %, Action Bias, Target Price
-- Executive summary text block below the table
+- 报告页眉：`批次总览 / Batch Overview` + 日期 + 数量
+- 批次总览表格，列：优先级、代码、公司、评级、信心度%、操作倾向、目标价
+- 表格下方为执行摘要文本块
 
-### Pages 2+ — Individual Company Reports (one per ticker)
+### 第 2 页起 — 单个公司报告（每个代码一页）
 
-- Report header: ticker + company name + confidence
-- Company report card containing:
-  - Bottom line box (dark background): `核心结论 / Bottom Line`
-  - Trade plan grid: Action, Entry, Stop Loss, Target
-  - Why Now section
-  - Two-column: Bull Case (left) + Risk Watch (right)
-- Research summary section (if present)
+- 报告页眉：代码 + 公司名 + 信心度
+- 公司报告卡片包含：
+  - 核心结论框（深色背景）：`核心结论 / Bottom Line`
+  - 交易计划网格：操作、入场价、止损价、目标价
+  - 为何此时 区块
+  - 双列布局：看多逻辑（左）+ 风险观察（右）
+- 研究摘要 区块（如存在）
 
-### Final Page — Watchlist + Validation
+### 末页 — 监控列表 + 验证
 
-- Report header: `监控状态 / Watchlist & 验证摘要 / Validation Summary`
-- Watchlist table with columns: Ticker, Action Bias, Status, Thesis State, Alert Level
-- Validation table with columns: Ticker, Regime, Historical Support, Environment Fit, Main Failure Mode, Confidence
-
----
-
-## 6. Data Mapping
-
-This section maps Hermes canonical objects to UI sections.
-
-### decision_card (PositionDecisionCard)
-
-| Field | UI Target |
-|-------|-----------|
-| `primary_action` | Poster Zone 1, Action Block; Report Page 2+, Trade Plan grid |
-| `conviction` | Poster Zone 1, Conviction Badge |
-| `thesis_summary` | Poster Zone 2, Thesis & Catalysts |
-| `why_now` | Poster Zone 1, Why Now bullets |
-| `alternatives` | Poster Zone 2, Instrument Choice (rejected column) |
-
-### instrument_recommendation (InstrumentRecommendation)
-
-| Field | UI Target |
-|-------|-----------|
-| `primary_action` | Poster Zone 2, Instrument Choice — PRIMARY box |
-| `ranked_alternatives` | Poster Zone 2, Instrument Choice — CONSERVATIVE + ALTERNATIVE boxes |
-| `reason` | Instrument box reason text |
-
-### options_structure (OptionsStructure)
-
-| Field | UI Target |
-|-------|-----------|
-| `instrument_action` | Poster Zone 2, Options Structure card label |
-| `primary_contract.expiry_months` | Poster Zone 2, Options Structure — Expiry |
-| `primary_contract.strike` | Poster Zone 2, Options Structure — Strike |
-| `break_even_price` | Poster Zone 2, Options Structure — Break-Even |
-| `primary_contract.delta_estimate` | Poster Zone 2, Options Structure — Delta |
-| `early_exit_summary` | Poster Zone 2, Options Structure — Early Exit |
-| `strategy_net_debit` | Report trade plan detail |
-| `strategy_net_credit` | Report trade plan detail |
-| `max_profit_pct` | Report trade plan detail |
-| `max_loss_pct` | Report trade plan detail |
-
-### early_exit_plan (EarlyExitPlan)
-
-| Field | UI Target |
-|-------|-----------|
-| `primary_exit_trigger` | Poster Zone 2, Early Exit section |
-| `severity` | Poster Zone 2, Early Exit severity chip |
-| `primary_reason` | Poster Zone 2, Early Exit reason text |
-| `first_trim` | Poster Zone 2, Early Exit — First Trim zone |
-| `main_profit` | Poster Zone 2, Early Exit — Main Profit zone |
-| `full_exit` | Poster Zone 2, Early Exit — Full Exit zone |
-
-### watchlist_entry (WatchlistEntry)
-
-| Field | UI Target |
-|-------|-----------|
-| `ticker` | Poster Zone 3, Watchlist State; Report Final Page |
-| `status` | Poster Zone 3, Status Badge |
-| `thesis_state` | Poster Zone 3, Thesis State chip; Report Final Page |
-| `alert_level` | Poster Zone 3, Alert chip; Report Final Page |
-| `current_action_bias` | Poster Zone 3, Action Bias label |
-
-### validation (ValidationResult)
-
-| Field | UI Target |
-|-------|-----------|
-| `regime` | Poster Zone 3, Validation chips — Regime |
-| `validation_confidence` | Poster Zone 3, Validation chips — Confidence % |
-| `historical_support` | Report Final Page, Validation table |
-| `environment_fit` | Report Final Page, Validation table |
-| `main_failure_mode` | Report Final Page, Validation table |
-
-### canonical report/signal (legacy fields, still needed)
-
-| Field | UI Target |
-|-------|-----------|
-| `signal.ticker` | All pages |
-| `signal.rating` | Report Page 1, Batch table; Page 2+ header |
-| `signal.confidence` | Report Page 1, Batch table; Page 2+ header |
-| `signal.entry_price` | Poster Zone 1, Target Price; Report Trade Plan |
-| `signal.take_profit` | Poster Zone 1, Target Price; Report Trade Plan |
-| `report.bottom_line` | Report Page 2+, Bottom Line box |
-| `report.why_now` | Poster Zone 1, Why Now; Report Why Now section |
-| `report.bull_case` | Poster Zone 2, Thesis & Catalysts; Report Bull Case |
-| `report.risk_watch` | Poster Zone 1, Risk Chips; Report Risk Watch |
-| `report.company_name` | All pages |
+- 报告页眉：`监控状态 / Watchlist & 验证摘要 / Validation Summary`
+- 监控列表表格，列：代码、操作倾向、状态、逻辑状态、预警级别
+- 验证表格，列：代码、市场状态、历史支持、环境匹配、主要失效模式、信心度
 
 ---
 
-## 7. Bilingual Rules
+## 六、数据映射
 
-### Chinese Primary, English Secondary
+本节将 Hermes 规范对象映射到 UI 区块。
 
-All labels follow the pattern: `中文 / English`
+### decision_card（PositionDecisionCard）
 
-Examples:
+| 字段 | UI 目标 |
+|------|---------|
+| `primary_action` | 海报区块一操作区块；PDF 第 2+ 页交易计划网格 |
+| `conviction` | 海报区块一信心徽章 |
+| `thesis_summary` | 海报区块二投资逻辑 + 催化剂 |
+| `why_now` | 海报区块一为何此时要点 |
+| `alternatives` | 海报区块二工具选择（已拒绝列） |
+
+### instrument_recommendation（InstrumentRecommendation）
+
+| 字段 | UI 目标 |
+|------|---------|
+| `primary_action` | 海报区块二工具选择 — 首选格子 |
+| `ranked_alternatives` | 海报区块二工具选择 — 保守方案 + 备选方案格子 |
+| `reason` | 工具格子内的理由文字 |
+
+### options_structure（OptionsStructure）
+
+| 字段 | UI 目标 |
+|------|---------|
+| `instrument_action` | 海报区块二期权结构卡片标签 |
+| `primary_contract.expiry_months` | 海报区块二期权结构 — 到期日 |
+| `primary_contract.strike` | 海报区块二期权结构 — 行权价 |
+| `break_even_price` | 海报区块二期权结构 — 盈亏平衡 |
+| `primary_contract.delta_estimate` | 海报区块二期权结构 — Delta |
+| `early_exit_summary` | 海报区块二期权结构 — 提前退出 |
+| `strategy_net_debit` | PDF 交易计划详情 |
+| `strategy_net_credit` | PDF 交易计划详情 |
+| `max_profit_pct` | PDF 交易计划详情 |
+| `max_loss_pct` | PDF 交易计划详情 |
+
+### early_exit_plan（EarlyExitPlan）
+
+| 字段 | UI 目标 |
+|------|---------|
+| `primary_exit_trigger` | 海报区块二早期退出区块 |
+| `severity` | 海报区块二早期退出严重性标签 |
+| `primary_reason` | 海报区块二早期退出理由文字 |
+| `first_trim` | 海报区块二早期退出 — 首轮减仓区间 |
+| `main_profit` | 海报区块二早期退出 — 主要利润区间 |
+| `full_exit` | 海报区块二早期退出 — 完全退出区间 |
+
+### watchlist_entry（WatchlistEntry）
+
+| 字段 | UI 目标 |
+|------|---------|
+| `ticker` | 海报区块三监控状态；PDF 末页 |
+| `status` | 海报区块三状态徽章 |
+| `thesis_state` | 海报区块三逻辑状态标签；PDF 末页 |
+| `alert_level` | 海报区块三预警标签；PDF 末页 |
+| `current_action_bias` | 海报区块三操作倾向标签 |
+
+### validation（ValidationResult）
+
+| 字段 | UI 目标 |
+|------|---------|
+| `regime` | 海报区块三验证区块 — 市场状态 |
+| `validation_confidence` | 海报区块三验证区块 — 信心度% |
+| `historical_support` | PDF 末页验证表格 |
+| `environment_fit` | PDF 末页验证表格 |
+| `main_failure_mode` | PDF 末页验证表格 |
+
+### Legacy 支撑字段（仅作支撑数据）
+
+canonical signal 和 canonical report 中的以下字段存在，仅作为决策对象的支撑数据，不可作为主要结构：
+
+| 字段 | 用途说明 |
+|------|---------|
+| `signal.ticker` | 所有页面 — 用于标识公司 |
+| `signal.confidence` | 信心度百分比显示 |
+| `signal.entry_price` | 海报区块一目标价；PDF 交易计划 |
+| `signal.take_profit` | 海报区块一目标价；PDF 交易计划 |
+| `report.company_name` | 所有页面显示公司全称 |
+| `report.executive_summary` | PDF 第 1 页执行摘要文本块 |
+
+---
+
+## 七、双语规则
+
+### 中文优先，英文为辅
+
+所有标签遵循 `中文 / English` 模式。
+
+示例：
 
 - `操作 / Action`
 - `为何此时 / Why Now`
@@ -339,107 +336,105 @@ Examples:
 - `监控状态 / Watchlist`
 - `验证摘要 / Validation`
 
-### Terminology Consistency
+### 术语一致性
 
-The following terms are fixed and must not be translated differently across the UI:
+以下术语固定，不可跨 UI 使用不同译法：
 
-| Chinese | English | Applied To |
-|---------|---------|-----------|
-| 买入 | BUY | Action |
-| 观望 | HOLD | Action |
-| 买入看涨 | Buy Call | Instrument |
-| 牛市看涨价差 | Bull Call Spread | Instrument |
-| 卖出备兑看跌 | Sell CSP | Instrument |
-| 备兑看涨 | Covered Call | Instrument |
-| 高信心 | HIGH CONVICTION | Conviction |
-| 中信心 | MEDIUM CONVICTION | Conviction |
-| 低信心 | LOW CONVICTION | Conviction |
-| 首选 | PRIMARY | Instrument role |
-| 保守方案 | CONSERVATIVE | Instrument role |
-| 备选方案 | ALTERNATIVE | Instrument role |
-| 持仓中 | Held | Watchlist status |
-| 重点关注 | High Priority | Watchlist status |
-| 研究进行中 | Research | Watchlist status |
-| 被动跟踪 | Passive | Watchlist status |
-| 逻辑强化 | Strengthening | Thesis state |
-| 逻辑稳定 | Stable | Thesis state |
-| 逻辑弱化 | Weakening | Thesis state |
-| 逻辑破坏 | Broken | Thesis state |
-| 趋势向上 | Trend Up | Regime |
-| 区间震荡 | Range Bound | Regime |
-| 高波动 | High Volatility | Regime |
-| 风险规避 | Risk Off | Regime |
+| 中文 | English | 应用场景 |
+|------|---------|---------|
+| 买入股票 | Buy Stock | 操作 |
+| 买入看涨 | Buy Call | 工具 |
+| 牛市看涨价差 | Bull Call Spread | 工具 |
+| 卖出备兑看跌 | Sell Cash-Secured Put | 工具 |
+| 备兑看涨 | Covered Call | 工具 |
+| 观望 | Watchlist | 操作 |
+| 不交易 | No Trade | 操作 |
+| 高信心 | HIGH CONVICTION | 信心度 |
+| 中信心 | MEDIUM CONVICTION | 信心度 |
+| 低信心 | LOW CONVICTION | 信心度 |
+| 首选 | PRIMARY | 工具角色 |
+| 保守方案 | CONSERVATIVE | 工具角色 |
+| 备选方案 | ALTERNATIVE | 工具角色 |
+| 持仓中 | Held | 监控状态 |
+| 重点关注 | High Priority | 监控状态 |
+| 研究进行中 | Research In Progress | 监控状态 |
+| 被动跟踪 | Passive Watch | 监控状态 |
+| 逻辑强化 | Strengthening | 逻辑状态 |
+| 逻辑稳定 | Stable | 逻辑状态 |
+| 逻辑弱化 | Weakening | 逻辑状态 |
+| 逻辑破坏 | Broken | 逻辑状态 |
+| 趋势向上 | Trend Up | 市场状态 |
+| 区间震荡 | Range Bound | 市场状态 |
+| 高波动 | High Volatility | 市场状态 |
+| 风险规避 | Risk Off | 市场状态 |
 
-### No Mixed Encoding
+### 无混合编码
 
-- All strings are defined in `strings_zh.py` (Chinese) and `strings_en.py` (English)
-- The renderer loads both and maps them at render time
-- No string is ever assembled from concatenated bytes
-- All HTML files declare `<meta charset="utf-8"/>` and save as UTF-8
+- 所有字符串定义在 `strings_zh.py`（中文）和 `strings_en.py`（英文）
+- 渲染时加载两者并一一映射
+- 无任何字符串通过拼接字节组装
+- 所有 HTML 文件声明 `<meta charset="utf-8"/>`，保存为 UTF-8
 
 ---
 
-## 8. Visual System
+## 八、视觉系统
 
-### Color Palette
+### 色彩方案
 
 ```css
-/* Primary action color — orange-red */
+/* 主要操作色 — 橙红色 */
 --color-action: #E85A3C;
 
-/* Positive / conviction / support — teal-green */
+/* 正面 / 信心度 / 支撑 — 青绿色 */
 --color-positive: #2DD4A8;
 
-/* Risk only — deep red */
+/* 纯风险色 — 深红色 */
 --color-risk: #C0392B;
 
-/* Main background — warm off-white */
+/* 主背景 — 暖白 */
 --color-bg: #FAF8F5;
 
-/* Card/panel background — white */
+/* 卡片/面板背景 — 白色 */
 --color-panel: #FFFFFF;
 
-/* Header/footer background — deep charcoal */
+/* 页眉/页脚背景 — 深炭色 */
 --color-header: #1C1C1E;
 --color-footer: #1C1C1E;
 
-/* Body text — deep neutral */
+/* 正文 — 深中性色 */
 --color-text: #1A1A1A;
 
-/* Secondary/muted text — gray */
+/* 次要/辅助文字 — 灰色 */
 --color-text-secondary: #6B7280;
 
-/* Text on dark backgrounds — white */
+/* 深色背景上文字 — 白色 */
 --color-text-inverse: #FFFFFF;
-
-/* Borders */
---color-border: #E5E5E5;
 ```
 
-### Typography
+### 排版
 
 ```css
-/* Main UI font — CJK-compatible sans-serif stack */
+/* 主 UI 字体 — CJK 兼容无衬线 */
 --font-main: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
 
-/* Numbers and financial data */
+/* 数字和金融数据 */
 --font-numbers: "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
 
-/* Monospace — for codes and tickers if needed */
+/* 等宽字体 — 代码和代码符号 */
 --font-mono: "SF Mono", "Consolas", monospace;
 ```
 
-Font size hierarchy:
+字号层级：
 
-- Action text (large): 56px, font-weight 800
-- Action sub-text: 28px, font-weight 300
-- Ticker symbol: 28px, font-weight 700
-- Section labels (Chinese): 13px, font-weight 700
-- Section labels (English): 10px, font-weight 400
-- Body text: 12px
-- Small labels: 10px
+- 操作文字（大）：56px，font-weight 800
+- 操作副文字：28px，font-weight 300
+- 代码符号：28px，font-weight 700
+- 区块标签（中文）：13px，font-weight 700
+- 区块标签（英文）：10px，font-weight 400
+- 正文：12px
+- 小标签：10px
 
-### Spacing System
+### 间距系统
 
 ```css
 --space-xs: 4px;
@@ -449,72 +444,72 @@ Font size hierarchy:
 --space-xl: 32px;
 ```
 
-### Chips / Badges / Cards
+### 标签 / 徽章 / 卡片样式
 
-**Status Badge** (used for watchlist status):
+**状态徽章**（用于监控状态）：
 
-- `Held`: teal-green background at 15% opacity, solid teal text
-- `High Priority`: orange-red background at 15% opacity, solid orange-red text
-- `Research`: amber background at 15% opacity, solid amber text
-- `Passive`: gray background at 10% opacity, solid gray text
+- `Held`（持仓中）：青绿色背景 15% 透明度，实色青绿文字
+- `High Priority`（重点关注）：橙红色背景 15% 透明度，实色橙红文字
+- `Research`（研究进行中）：琥珀色背景 15% 透明度，实色琥珀文字
+- `Passive`（被动跟踪）：灰色背景 10% 透明度，实色灰色文字
 
-**Conviction Badge** (poster zone 1):
+**信心徽章**（海报区块一）：
 
-- 2px solid border in `--color-positive`
-- Transparent background
-- Chinese conviction text + English secondary
+- 2px solid 边框，颜色为 `--color-positive`
+- 透明背景
+- 中文信心文字 + 英文副文字
 
-**Risk Chip** (poster zone 1):
+**风险标签**（海报区块一）：
 
-- Deep red border
-- Semi-transparent deep red background
-- Chinese risk text + English secondary
+- 深红色边框
+- 半透明深红色背景
+- 中文风险主文字 + 英文次要文字
 
-**KPI Card** (poster zone 2):
+**KPI 卡片**（海报区块二）：
 
-- White background
-- 3px top border in `--color-positive`
-- 4px border-radius
-- Subtle card shadow
+- 白色背景
+- 顶部 3px 边框，颜色为 `--color-positive`
+- 4px 圆角
+- 轻阴影
 
-**Section Card** (poster zone 2):
+**区块卡片**（海报区块二）：
 
-- White background
-- Left accent bar: 3px `--color-action` vertical line
-- Section label in Chinese (bold) + English (light)
+- 白色背景
+- 左侧强调线：3px `--color-action` 垂直线
+- 中文区块标签（加粗）+ 英文区块标签（浅色）
 
-### Instrument Hierarchy Rules
+### 工具层级规则
 
-The instrument row shows at most 3 instruments in priority order:
+工具行最多按优先级显示 3 种工具：
 
-1. **PRIMARY** (`首选`): orange-red border, light orange-red background tint, orange-red role label
-2. **CONSERVATIVE** (`保守方案`): teal-green border, light teal-green background tint, teal-green role label
-3. **ALTERNATIVE** (`备选方案`): gray border, no background tint, gray role label
+1. **首选 / PRIMARY**：橙红色边框，浅橙红色背景 tint，橙红色角色标签
+2. **保守方案 / CONSERVATIVE**：青绿色边框，浅青绿色背景 tint，青绿色角色标签
+3. **备选方案 / ALTERNATIVE**：灰色边框，无背景 tint，灰色角色标签
 
-Rejected instruments are not shown in the poster instrument row.
+已拒绝的工具不在海报工具行中显示。
 
 ---
 
-## 9. Technical Analysis Rendering Rules
+## 九、技术分析渲染规则
 
-### Boss-Readable Only
+### 仅 boss 可读
 
-The technical analysis section is a **summary**, not an indicator dump.
+技术分析区块是**摘要**，而非指标转储。
 
-### What to Show
+### 应显示的内容
 
-- **Support**: a single price level or range, e.g., `$165–170`
-- **Resistance**: a single price level or range, e.g., `$220–225`
-- **Trend**: a short directional phrase, e.g., `上升趋势 / Uptrend` or `震荡整理 / Range Bound`
-- **Momentum** (if available): a short phrase, e.g., `动能较强 / Strong Momentum`
+- **支撑位**：单一价格水平或区间，如 `$165–170`
+- **阻力位**：单一价格水平或区间，如 `$220–225`
+- **趋势**：简短方向短语，如 `上升趋势 / Uptrend` 或 `区间震荡 / Range Bound`
+- **动能**（如有）：简短短语，如 `动能较强 / Strong Momentum`
 
-### What NOT to Show
+### 不应显示的内容
 
-- No raw indicator values (RSI, MACD, Bollinger values, etc.)
-- No chart descriptions beyond a single trend label
-- No multiple timeframe analysis unless it fits in one short phrase
+- 无原始指标值（RSI、MACD、布林线值等）
+- 无超出单一趋势标签的图表描述
+- 无多时间周期分析（除非可压缩为一句短语）
 
-### Rendering Pattern
+### 渲染模式
 
 ```
 支撑位 / Support: $165–170
@@ -524,132 +519,133 @@ The technical analysis section is a **summary**, not an indicator dump.
 
 ---
 
-## 10. Pagination / Print Rules
+## 十、分页 / 打印规则
 
-### Poster
+### 海报
 
-- Fixed aspect ratio: 3:4 (portrait)
-- Rendered at A4 or Letter size depending on locale
-- `overflow: hidden` to prevent content from spilling off page
-- `@page { size: A4 portrait; margin: 0; }` to eliminate browser margins
+- 固定宽高比：3:4（竖向）
+- 按 A4 或 Letter 尺寸渲染（视地区而定）
+- `overflow: hidden` 防止内容溢出页面
+- `@page { size: A4 portrait; margin: 0; }` 消除浏览器边距
 
-### PDF Report
+### PDF 报告
 
-- Page size: A4 portrait, standard margins (15mm)
-- `page-break-after: always` on every report page except the last
-- `page-break-inside: avoid` on company report cards to prevent mid-card splits
-- `page-break-after: auto` on the last page
+- 页面尺寸：A4 竖向，标准边距（15mm）
+- 每个报告页（非末页）使用 `page-break-after: always`
+- 公司报告卡片使用 `page-break-inside: avoid` 防止中途分页
+- 末页使用 `page-break-after: auto`
 
-### Keep-Together Rules
+### 整体规则
 
-These elements must not be split across pages:
+以下元素不可跨页分隔：
 
-- Company report card (keep together on one page if possible)
-- Watchlist table header (keep with first row)
-- Validation table header (keep with first row)
-- Bottom line box (keep together)
+- 公司报告卡片（尽量保持在同一页）
+- 监控列表表头（与首行一起保留）
+- 验证表格表头（与首行一起保留）
+- 核心结论框（整体保留）
 
-### Section Splitting Constraints
+### 分隔约束
 
-- The batch overview table may break between rows
-- The trade plan grid (4 columns) may break between columns only if absolutely necessary
-- Instrument row must not break mid-row
-
----
-
-## 11. Non-Goals
-
-This spec explicitly does **not** include:
-
-- **New trading logic**: No new buy/sell/wait decision algorithms
-- **New validation logic**: No new validation engine implementations
-- **Pipeline redesign**: The orchestrator, subagent executor, and evidence store are out of scope
-- **New data sources**: Futu remains the primary market data provider
-- **Auto-execution**: No broker integration or order placement
-- **Bearish surfaces**: The system remains bullish-only and alert-only
-- **Marketing landing page**: This is not a marketing document
-- **PPT deck**: Slides are not the target output
-- **Real-time streaming UI**: This spec covers print/export surfaces only, not live web dashboards
+- 批次总览表格允许在行间分页
+- 交易计划网格（4 列）仅在绝对必要时才在列间分页
+- 工具行不可在行中分隔
 
 ---
 
-## 12. Acceptance Criteria
+## 十一、非目标
 
-### General
+本规范明确**不包含**：
 
-- [ ] All text is Chinese-primary, English-secondary with `中文 / English` pattern
-- [ ] No mojibake — all strings come from `strings_zh.py` and `strings_en.py`
-- [ ] No raw database dumps or unformatted numbers
-- [ ] Empty fields display `—` not blank
-- [ ] All colors render correctly in both screen and print
-
-### Poster
-
-- [ ] Poster renders correctly at A4 portrait dimensions without overflow
-- [ ] Zone 1 (Decision Hero) contains all 3-second decision information
-- [ ] Zone 2 (Detail Cards) contains KPI, Thesis, Technical, Instrument, Options, Early Exit
-- [ ] Zone 3 (Status Footer) contains Watchlist State and Validation Summary
-- [ ] Instrument row shows at most 3 instruments: PRIMARY + CONSERVATIVE + ALTERNATIVE
-- [ ] Risk chips appear in Zone 1 and are readable
-- [ ] Printed poster fits on a single page
-
-### PDF Report
-
-- [ ] Page 1 shows Batch Overview table and Executive Summary
-- [ ] Pages 2+ show one company report per page
-- [ ] Final page shows Watchlist table and Validation table
-- [ ] Company report card does not split across pages
-- [ ] Table headers repeat on page breaks if table continues
-- [ ] `page-break-*` CSS rules work correctly in Edge headless PDF export
-
-### Data Mapping
-
-- [ ] `PositionDecisionCard` fields populate the correct poster sections
-- [ ] `InstrumentRecommendation` correctly marks PRIMARY / CONSERVATIVE / ALTERNATIVE
-- [ ] `OptionsStructure` renders the Options Structure card only when options are applicable
-- [ ] `EarlyExitPlan` renders the Early Exit section with three zones
-- [ ] `WatchlistEntry` populates the poster footer status badge and report final page table
-- [ ] `ValidationResult` populates the poster footer chips and report final page table
-
-### Bilingual
-
-- [ ] All section labels use Chinese primary + English secondary
-- [ ] Instrument names use the fixed terminology table (no synonyms)
-- [ ] Watchlist status uses the fixed terminology table
-- [ ] All dates use `YYYY-MM-DD` format
-- [ ] All percentages use `XX%` notation
-
-### Visual
-
-- [ ] Action color `#E85A3C` used only for primary action and emphasis
-- [ ] Positive color `#2DD4A8` used only for conviction, support, and positive indicators
-- [ ] Risk color `#C0392B` used only for risk chips and loss indicators
-- [ ] Font stack includes Noto Sans SC for CJK compatibility
-- [ ] All interactive/decorative colors pass `print-color-adjust: exact`
-
-### Technical
-
-- [ ] `export_poster_pdf()` correctly accepts all decision objects
-- [ ] `export_batch_report_pdf()` correctly accepts all decision objects
-- [ ] `render_boss_poster()` correctly accepts all decision objects
-- [ ] `render_batch_report()` correctly accepts all decision objects
-- [ ] PDF export via Edge headless produces valid PDF files
-- [ ] No regressions in existing `export_task_pdf()` function
+- **新交易逻辑**：无新的买入/卖出/等待决策算法
+- **新验证逻辑**：无新的验证引擎实现
+- **流程重新设计**：编排器、子代理执行器、证据库不在范围内
+- **新数据源**：Futu 仍为主要市场数据提供方
+- **自动执行**：无券商集成或下单功能
+- **熊市表面**：系统保持牛市 only 和预警 only
+- **营销落地页**：本界面非营销文档
+- **PPT 演示**：幻灯片不是目标产出
+- **实时流 UI**：本规范仅覆盖打印/导出表面，不含实时 Web 看板
 
 ---
 
-## Appendix: File Targets
+## 十二、验收标准
 
-This spec governs changes to the following files:
+### 通用标准
 
-| File | Role |
+- [ ] 所有文字中文优先、英文辅佐，遵循 `中文 / English` 模式
+- [ ] 无乱码——所有字符串来自 `strings_zh.py` 和 `strings_en.py`
+- [ ] 无原始数据库转储或无格式数字
+- [ ] 空字段显示 `—` 而非空白
+- [ ] 屏幕和打印颜色渲染正确
+
+### 海报标准
+
+- [ ] 海报在 A4 竖向尺寸下正确渲染，无溢出
+- [ ] 区块一（决策主角）包含 3 秒决策所需的全部信息
+- [ ] 区块二（详情卡片）包含 KPI、投资逻辑、技术面、工具、期权、早期退出
+- [ ] 区块三（状态页脚）包含监控状态和验证摘要
+- [ ] 工具行最多显示 3 种工具：首选 + 保守方案 + 备选方案
+- [ ] 风险标签出现在区块一，可读
+- [ ] 打印海报可在单页完整呈现
+
+### PDF 报告标准
+
+- [ ] 第 1 页显示批次总览表格和执行摘要
+- [ ] 第 2 页起每个代码单独一页
+- [ ] 末页显示监控列表表格和验证表格
+- [ ] 公司报告卡片不分页
+- [ ] 表格跨页时表头重复
+- [ ] Edge headless PDF 导出中 `page-break-*` CSS 规则正确生效
+
+### 数据映射标准
+
+- [ ] `PositionDecisionCard` 字段正确填充对应海报区块
+- [ ] `InstrumentRecommendation` 正确标记首选 / 保守方案 / 备选方案
+- [ ] `OptionsStructure` 仅在适用时渲染期权结构卡片
+- [ ] `EarlyExitPlan` 以三个区间正确渲染早期退出区块
+- [ ] `WatchlistEntry` 正确填充海报页脚状态徽章和报告末页表格
+- [ ] `ValidationResult` 正确填充海报页脚验证标签和报告末页表格
+- [ ] Legacy signal/report 字段作为支撑数据，不可作为页面主结构
+
+### 双语标准
+
+- [ ] 所有区块标签中文优先、英文辅佐
+- [ ] 工具名称使用固定术语表（无同义词）
+- [ ] 监控状态使用固定术语表
+- [ ] 日期使用 `YYYY-MM-DD` 格式
+- [ ] 百分比使用 `XX%` 格式
+
+### 视觉标准
+
+- [ ] 操作色 `#E85A3C` 仅用于主要操作和强调
+- [ ] 正面色 `#2DD4A8` 仅用于信心度、支撑和正面指标
+- [ ] 风险色 `#C0392B` 仅用于风险标签和亏损指标
+- [ ] 字体栈包含 Noto Sans SC 以支持 CJK
+- [ ] 所有交互/装饰色通过 `print-color-adjust: exact` 验证
+
+### 技术标准
+
+- [ ] `export_poster_pdf()` 正确接收所有决策对象
+- [ ] `export_batch_report_pdf()` 正确接收所有决策对象
+- [ ] `render_boss_poster()` 正确接收所有决策对象
+- [ ] `render_batch_report()` 正确接收所有决策对象
+- [ ] Edge headless PDF 导出生成有效 PDF 文件
+- [ ] 现有 `export_task_pdf()` 函数无回归
+
+---
+
+## 附录：文件目标
+
+本规范管理以下文件的更改：
+
+| 文件 | 职责 |
 |------|------|
-| `agent/research_v1/report_templates/renderer.py` | Poster and batch report rendering logic |
-| `agent/research_v1/report_templates/boss_poster_base.html` | Poster HTML template |
-| `agent/research_v1/report_templates/boss_report_base.html` | Batch report HTML template |
-| `agent/research_v1/report_templates/boss_report_pdf.css` | Shared CSS for poster and report |
-| `agent/research_v1/report_templates/strings_zh.py` | Chinese string constants |
-| `agent/research_v1/report_templates/strings_en.py` | English string constants |
-| `agent/research_v1/report_pdf.py` | PDF export functions (no business logic changes) |
+| `agent/research_v1/report_templates/renderer.py` | 海报和批次报告渲染逻辑 |
+| `agent/research_v1/report_templates/boss_poster_base.html` | 海报 HTML 模板 |
+| `agent/research_v1/report_templates/boss_report_base.html` | 批次报告 HTML 模板 |
+| `agent/research_v1/report_templates/boss_report_pdf.css` | 海报和报告共享 CSS |
+| `agent/research_v1/report_templates/strings_zh.py` | 中文字符串常量 |
+| `agent/research_v1/report_templates/strings_en.py` | 英文字符串常量 |
+| `agent/research_v1/report_pdf.py` | PDF 导出函数（无业务逻辑更改） |
 
-No other files in `agent/research_v1/` are in scope for this redesign.
+`agent/research_v1/` 下其他文件不在本次重新设计范围内。
