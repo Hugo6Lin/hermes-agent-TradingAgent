@@ -1,122 +1,333 @@
-# agent/research_v1/ — Canonical Research Pipeline
+# `agent/research_v1/` - Canonical Research and Image Report Pipeline
 
 ## What This Directory Is
 
-The primary implementation directory for Hermes. It contains the full canonical research
-pipeline from natural language request to canonical signal, report, review, and trade plan.
+This is the primary implementation directory for Hermes.
 
-## Core Files
+It owns the full canonical research pipeline:
 
-### Pipeline Host
-- **`app.py`** — `HermesResearchApp` — wires the entire canonical pipeline.
-  Entry point: `app.run("Research AAPL")` → `ResearchResult`
+- natural-language request intake
+- research task decomposition
+- market-data collection
+- multi-role evidence gathering
+- final signal and report generation
+- bullish decision layers (thesis, instrument, options, exit, watchlist, validation)
+- persistence
+- image-report generation inputs and automation
 
-### Pipeline Components
-- **`task_router.py`** — parses natural language → `ResearchTask` (extracts tickers, intent)
-- **`orchestrator.py`** — decomposes `ResearchTask` → `SubagentTask[]`, assembles `EvidenceBundle`
-- **`subagent_executor.py`** — executes `SubagentTask[]` via analyst agents, uses `MarketDataService`
-- **`evidence_store.py`** — normalizes analyst outputs → `EvidenceItem[]`
-- **`final_judge.py`** — `judge()` → `CanonicalSignal` + `CanonicalReport` from `EvidenceBundle`
-- **`reviewer.py`** — optional `CanonicalReview` quality gate
-- **`signal_pipeline.py`** — `SignalPersistencePipeline` for DB persistence
+If a model is asked to "run Hermes", "research a ticker", "generate a boss report", or
+"produce the poster/report images", this directory is the main place it must understand.
 
-### Bullish Decision (Phase 14)
-- **`thesis_engine.py`** — `ThesisEngine` evaluates stock quality, valuation, catalysts → `UnderlyingThesis` (Investable / Watchlist / No Trade)
-- **`instrument_selection.py`** — `InstrumentSelectionEngine` selects best bullish expression → `InstrumentRecommendation` (Buy Stock / Buy Call / Bull Call Spread / Sell CSP / Covered Call / No Trade)
+## Current Product Direction
 
-### Market Data (Phase 12)
-- **`market_data_service.py`** — `MarketDataService` fetches Futu-first market context
-- **`data/providers.py`** — `MarketDataProvider` ABC + `FutuMarketDataProvider` / `YahooMarketDataProvider` / `FallbackMarketDataProvider`
-- **`data/futu_opend.py`** — `FutuOpenDConfig` + `FutuQuoteClient` wrapper
+Hermes now has two distinct layers:
 
-### Output/Viewing
-- **`trade_plan.py`** — `TradePlanGenerator` → `TradePlan` from `CanonicalSignal`
-- **`viewer.py`** — web viewer: `/` (dashboard) / `/batches/latest` / `/ticker/<item_id>`
-- **`report_pdf.py`** — canonical task PDF export via Microsoft Edge headless
-- **`report_pdf_legacy.py`** — batch PDF export
+1. **Research decision layer**
+   - produces the actual financial judgment
+   - ends at `TickerResearchResult`
 
-### CLI / Batch
-- **`batch_cli.py`** — `batch_cli` commands: `init` / `status` / `viewer` / `export-pdf`
-- **`research_batch_service.py`** — `save_batch_research()` for structured batch payloads
+2. **Report delivery layer**
+   - converts research outputs into boss-facing deliverables
+   - Phase 19 mainline is now **image-report-first**
+   - image reports are generated from:
+     - `OrchestratorReportPack`
+     - `ImagePromptPack`
+     - manual or OpenAI image generation backends
 
-### Data & Contracts
-- **`contracts.py`** — ALL canonical dataclasses: `ResearchTask`, `SubagentTask`, `EvidenceItem`,
-  `CanonicalSignal`, `CanonicalReport`, `CanonicalReview`, `EvidenceBundle`
-- **`data/database.py`** — `ResearchDatabase` with all SQLite tables
-- **`data/quality.py`** — `DataQualityValidator` for price history validation
+The old HTML/CSS/PDF-first report direction is no longer the main Phase 19 architecture.
 
-### Analysts
-- **`analysts/technical.py`** — EMA/SMA/RSI/MACD signals from candles
-- **`analysts/fundamentals.py`** — revenue/earnings/debt equity analysis
-- **`analysts/news.py`** — news sentiment scoring
-- **`analysts/sentiment.py`** — social sentiment analysis
-- **`analysts/industry.py`** — industry trend analysis
-- **`analysts/options.py`** — put/call ratio, open interest analysis
-- **`analysts/risk.py`** — risk rating and exposure analysis
-- **`analysts/valuation.py`** — DCF/DDM/relative valuation
+## Main Flow
 
-### Legacy (Frozen)
-- **`researchers/bull_researcher.py`** — Phase 1-4 bull case researcher
-- **`researchers/bear_researcher.py`** — Phase 1-4 bear case researcher
-- **`grading.py`** — Phase 1-10 grading (replaced by `final_judge.py`)
-- **`signal_pipeline_legacy.py`** — legacy signal persistence
-- **`reviewer_legacy.py`** — legacy reviewer
-- **`trade_plan_legacy.py`** — legacy trade plan
-
-## Data Flow
-
-```
-HermesResearchApp.run(request)
-  ├─ TaskRouter.route() → ResearchTask
-  ├─ Orchestrator.decompose() → SubagentTask[]
-  │    └─ Each SubagentTask: {agent_role, ticker, objective, required_context}
-  ├─ MarketDataService.fetch_context_for_ticker() [Futu-first, per ticker]
-  │    └─ market_data + candles + option_chain + _fallback_reasons
-  ├─ SubagentExecutor.execute(subtask)
-  │    ├─ injects market data into required_context
-  │    └─ calls LLM with analyst prompt → raw JSON
-  ├─ EvidenceStore.normalize() → EvidenceItem[]
-  ├─ Orchestrator.assemble_bundle() → EvidenceBundle
-  ├─ Orchestrator.assemble_judge_packet() → JudgeInputPacket
-  ├─ FinalJudge.judge() → CanonicalSignal + CanonicalReport
-  ├─ SignalPersistencePipeline.persist_canonical_signal() + .persist_canonical_report()
-  ├─ TradePlanGenerator.generate() → trade_plan dict
-  ├─ Reviewer.review() [optional] → CanonicalReview
-  ├─ Phase 14: ThesisEngine.evaluate() → UnderlyingThesis [additive]
-  ├─ Phase 14: InstrumentSelectionEngine.choose() → InstrumentRecommendation [additive]
-  └─ _run_ticker_pipeline() → TickerResearchResult {signal, report, review, trade_plan, audit, thesis, instrument_recommendation, decision_card}
+```mermaid
+flowchart LR
+    A["Research Request"] --> B["TaskRouter"]
+    B --> C["Orchestrator"]
+    C --> D["MarketDataService"]
+    C --> E["SubagentExecutor"]
+    D --> E
+    E --> F["EvidenceStore"]
+    F --> G["FinalJudge"]
+    G --> H["CanonicalSignal"]
+    G --> I["CanonicalReport"]
+    H --> J["TradePlan"]
+    I --> K["TickerResearchResult"]
+    J --> K
+    K --> L["OrchestratorReportPack"]
+    L --> M["ImagePromptPack"]
+    M --> N["Image Report Service"]
+    N --> O["Manual Job Bundle or OpenAI Images"]
 ```
 
-## How It Relates to Other Directories
+## Key Files
 
-- **`tests/agent/research_v1/`** — mirrors this directory for testing
-- **`docs/`** — system docs reference this directory's modules
-- **`agent/research_v1/data/`** — data providers and SQLite persistence
-- **`agent/research_v1/analysts/`** — called by `subagent_executor.py`
+### Canonical Pipeline Host
+
+- **`app.py`**
+  - owns `HermesResearchApp`
+  - main entrypoint for research
+  - now also exposes `generate_image_report(...)`
+
+### Canonical Research Components
+
+- **`task_router.py`** - request -> `ResearchTask`
+- **`orchestrator.py`** - workflow control, evidence readiness, judge packet assembly
+- **`subagent_executor.py`** - analyst execution
+- **`evidence_store.py`** - normalize raw analyst output
+- **`final_judge.py`** - produce `CanonicalSignal` + `CanonicalReport`
+- **`reviewer.py`** - optional quality review
+- **`signal_pipeline.py`** - persistence of canonical outputs
+- **`trade_plan.py`** - legacy-compatible trade plan generation
+
+### Bullish Decision Layers
+
+- **`thesis_engine.py`** - `UnderlyingThesis`
+- **`instrument_selection.py`** - `InstrumentRecommendation`
+- **`options_decision.py`** - `OptionsStructure`
+- **`early_exit.py`** - `EarlyExitPlan`
+- **`watchlist_alerts.py`** - `WatchlistEntry` / alert behavior
+- **`validation_engine.py`** - `ValidationResult`
+
+### Report Delivery - Phase 19 Mainline
+
+- **`orchestrator_reporting.py`**
+  - builds `OrchestratorReportPack`
+  - this is the content truth for boss-facing reports
+
+- **`image_report_contracts.py`**
+  - defines image-report objects:
+    - `OrchestratorReportPack`
+    - `ImagePromptPack`
+    - `ImageReportArtifacts`
+    - generation result wrappers
+
+- **`image_prompt_builder.py`**
+  - converts `OrchestratorReportPack` into page-by-page prompts
+
+- **`image_report_generator.py`**
+  - backend abstraction for image generation
+  - supports:
+    - `ManualImageJobBackend`
+    - `OpenAIImageBackend`
+
+- **`image_report_service.py`**
+  - chains:
+    - `TickerResearchResult`
+    - `OrchestratorReportPack`
+    - `ImagePromptPack`
+    - image generation result
+
+### Older Secondary Report Surfaces
+
+- **`viewer.py`**
+  - browser viewer for stored results
+- **`report_pdf.py`**
+  - older PDF-oriented export path
+
+These still exist, but they are no longer the strategic Phase 19 mainline.
+
+## The Actual Result Object You Should Trust
+
+For any new work, the most important runtime object is:
+
+- `TickerResearchResult`
+
+It contains:
+
+- `signal`
+- `report`
+- `review`
+- `trade_plan`
+- `thesis`
+- `instrument_recommendation`
+- `decision_card`
+- `options_structure`
+- `early_exit`
+- `watchlist_entry`
+- `validation`
+
+Phase 19 report delivery must derive from these real decision objects, not from old generic
+`BUY/HOLD/SELL` presentation shells.
+
+## Image Report Modes
+
+Hermes supports two report-generation modes:
+
+### 1. Manual mode
+
+Use when:
+
+- no API key is configured
+- human-in-the-loop generation is desired
+- validating prompts and page structure
+
+Output:
+
+- jobs bundle JSON
+- per-page prompt files
+- manifest JSON
+
+Entry:
+
+- `HermesResearchApp.generate_image_report(..., mode="manual")`
+
+### 2. OpenAI mode
+
+Use when:
+
+- `OPENAI_API_KEY` is configured
+- automatic image generation is desired
+
+Output:
+
+- real `.png` page artifacts
+- manifest JSON
+
+Entry:
+
+- `HermesResearchApp.generate_image_report(..., mode="openai")`
+
+## Quick Start
+
+### Run research
+
+```bash
+python -m agent.research_v1.app "Research AAPL"
+```
+
+### Programmatic research
+
+```python
+from agent.research_v1.app import HermesResearchApp
+
+app = HermesResearchApp()
+research = app.run("Research AAPL fundamentals and options")
+
+for tr in research.ticker_results:
+    print(tr.ticker, tr.decision_card.primary_action if tr.decision_card else None)
+```
+
+### Generate a manual image-report bundle
+
+```python
+from agent.research_v1.app import HermesResearchApp
+
+app = HermesResearchApp()
+research = app.run("Research AAPL fundamentals and options")
+
+for tr in research.ticker_results:
+    result = app.generate_image_report(
+        tr,
+        company_name="Apple Inc.",
+        mode="manual",
+        output_dir="output/image_reports",
+    )
+    print(result.phase_19a_job_state)
+    print(result.job_bundle_path)
+```
+
+### Generate images automatically with OpenAI
+
+```python
+from agent.research_v1.app import HermesResearchApp
+
+app = HermesResearchApp()
+research = app.run("Research AAPL fundamentals and options")
+
+for tr in research.ticker_results:
+    result = app.generate_image_report(
+        tr,
+        company_name="Apple Inc.",
+        mode="openai",
+        output_dir="output/image_reports",
+    )
+    print(result.artifacts_present)
+    print(result.manifest_path)
+```
+
+Environment:
+
+```bash
+set OPENAI_API_KEY=your_key_here
+set OPENAI_IMAGE_MODEL=gpt-image-2
+```
+
+## Relationship to Other Directories
+
+- **`tests/agent/research_v1/`**
+  - authoritative test mirror of this directory
+
+- **`docs/`**
+  - architecture, acceptance, workflow, operator docs
+
+- **`agent/research_v1/data/`**
+  - persistence and provider layer
+
+- **`agent/research_v1/analysts/`**
+  - analyst role implementations used by `subagent_executor.py`
 
 ## If You Modify Code Here
 
-- `app.py` → check `test_app_integration.py`, `test_phase13_acceptance.py`
-- `contracts.py` → check ALL files that use canonical dataclasses
-- `market_data_service.py` → check `test_market_data_service.py`
-- `subagent_executor.py` → check analyst files and `test_market_data_service.py`
-- `final_judge.py` → check `test_app_integration.py`
-- `data/database.py` → check all DB-using tests
-- `viewer.py` / `report_pdf.py` → check `test_p6_viewer.py`, `test_phase13_acceptance.py`
-- `batch_cli.py` → check `test_batch_cli.py`
+- `app.py`
+  - check `test_app_integration.py`
+  - check `test_bullish_decision_integration.py`
+  - check `test_image_report_pipeline.py`
 
-## Entry Points
+- `contracts.py`
+  - check all dataclass consumers
+
+- `orchestrator_reporting.py`
+  - check `test_image_report_pipeline.py`
+  - verify locked facts still match true decision objects
+
+- `image_prompt_builder.py`
+  - check `test_image_report_pipeline.py`
+  - verify approved action vocabulary is preserved
+
+- `image_report_generator.py`
+  - check `test_image_report_pipeline.py`
+  - verify manual and openai modes both still work
+
+- `image_report_service.py`
+  - check `test_image_report_pipeline.py`
+  - verify main entrypoints still produce valid artifacts
+
+- `viewer.py` / `report_pdf.py`
+  - treat as secondary surfaces
+  - do not confuse them with the new Phase 19 mainline
+
+## Canonical Decision Vocabulary
+
+Visible action language must stay inside this approved set:
+
+- `Buy Stock`
+- `Buy Call`
+- `Bull Call Spread`
+- `Sell Cash-Secured Put`
+- `Covered Call`
+- `Watchlist`
+- `No Trade`
+
+Do not let report delivery regress into generic visible UI language such as:
+
+- `BUY`
+- `HOLD`
+- `SELL`
+
+## What a New Model Should Do First
+
+If a new model is dropped into Hermes and told to work on the system, it should:
+
+1. read this file
+2. read `agent/research_v1/AGENT.md`
+3. understand that `TickerResearchResult` is the real research output
+4. understand that Phase 19 mainline is image-report-first
+5. understand that `generate_image_report(...)` is the top-level report delivery entrypoint
+
+## Useful Tests
 
 ```bash
-# Primary: canonical research
-python -m agent.research_v1.app "Research AAPL"
-
-# Batch viewer server
-python -m agent.research_v1.batch_cli --app-root .hermes viewer --host 127.0.0.1 --port 8008
-
-# Batch PDF export
-python -m agent.research_v1.batch_cli --app-root .hermes export-pdf --batch-id 1
-
-# Standalone viewer
-python -m agent.research_v1.viewer
+python -m pytest tests/agent/research_v1/test_bullish_decision_integration.py -q
+python -m pytest tests/agent/research_v1/test_validation_engine.py -q
+python -m pytest tests/agent/research_v1/test_watchlist_alerts.py -q
+python -m pytest tests/agent/research_v1/test_image_report_pipeline.py -q
 ```

@@ -1,5 +1,7 @@
 """Tests for LLM client adapters."""
 
+from pathlib import Path
+
 import pytest
 from agent.research_v1.llm_clients import (
     LLMResponse,
@@ -9,13 +11,36 @@ from agent.research_v1.llm_clients import (
     OpenAIClient,
     AnthropicClient,
     get_llm_client,
+    _load_local_provider_key,
 )
 
 
 def test_minimax_client_initialization():
-    """Create MiniMaxClient with api_key="test-key" and assert model == "MiniMax-2.7"."""
+    """Create MiniMaxClient with api_key="test-key" and assert default model is usable.""" 
     client = MiniMaxClient(api_key="test-key")
-    assert client.model == "MiniMax-2.7"
+    assert client.model == "MiniMax-M2.7-HighSpeed"
+
+
+def test_load_local_provider_key_reads_minimax_key(tmp_path, monkeypatch):
+    key_file = tmp_path / "API_KEY.txt"
+    key_file.write_text(
+        "OpenAI:gibberish\nMinimax-m2.7-highspeed：sk-test-minimax-key\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_LOCAL_API_KEY_FILE", str(key_file))
+    assert _load_local_provider_key("minimax") == "sk-test-minimax-key"
+
+
+def test_minimax_client_uses_local_key_file_when_env_missing(tmp_path, monkeypatch):
+    key_file = tmp_path / "API_KEY.txt"
+    key_file.write_text(
+        "MINIMAX_API_KEY=sk-local-default\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    monkeypatch.setenv("HERMES_LOCAL_API_KEY_FILE", str(key_file))
+    client = MiniMaxClient()
+    assert client.api_key == "sk-local-default"
 
 
 def test_minimax_client_format_messages():

@@ -1,108 +1,223 @@
-# AGENT.md — agent/research_v1/
+# `agent/research_v1/AGENT.md`
 
 ## Responsibilities
 
-This directory owns the canonical research pipeline. Every piece of business logic for
-Hermes research lives here. The pipeline runs:
+This directory owns the canonical Hermes research pipeline and the Phase 19 image-report delivery layer.
 
-```
-TaskRouter → Orchestrator → SubagentExecutor → EvidenceStore → FinalJudge → TradePlan → Reviewer
-```
+It is responsible for:
+
+- request routing
+- workflow orchestration
+- evidence normalization
+- final signal/report generation
+- bullish decision layering
+- persistence
+- boss-facing image-report preparation and generation
+
+It is not responsible for:
+
+- brokerage execution
+- bearish trading features
+- autonomous trading
+- replacing the underlying decision authority with image generation
 
 ## Boundaries
 
-**Do NOT:**
-- Add new features to legacy files (`researchers/`, `grading.py`, `*_legacy.py`)
-- Bypass the canonical pipeline for new features — extend it instead
-- Add fields to canonical dataclasses in `contracts.py` without checking all consumers
-- Change `MarketDataProvider` ABC methods without updating all provider implementations
-- Modify database schema without a migration strategy
+### Research authority
 
-**Do:**
-- Add new modules to `analysts/` for new analyst roles
-- Add new `AgentRole` enum values in `contracts.py`
-- Extend `FallbackMarketDataProvider` with new fallback strategies
-- Add new viewer routes in `viewer.py` and corresponding tests in `test_p6_viewer.py`
-- Add Phase 14 decision engines as new modules (not in existing canonical files)
+Financial judgment is decided before report generation.
+
+The actual decision authority remains:
+
+- `FinalJudge`
+- `thesis_engine`
+- `instrument_selection`
+- `options_decision`
+- `early_exit`
+- `watchlist_alerts`
+- `validation_engine`
+
+### Report authority
+
+Phase 19 report delivery is downstream of the research result.
+
+- `OrchestratorReportPack` = content truth
+- `ImagePromptPack` = generation control layer
+- image backend = visual output only
+
+The image layer must not invent a different trade action or numeric fact.
 
 ## Key Interfaces
 
-### HermesResearchApp (app.py)
+### `HermesResearchApp`
+
+Primary application API:
+
 ```python
 class HermesResearchApp:
-    def __init__(self, llm_client=None, database=None, market_data_service=None)
     def run(self, request: str) -> ResearchResult
-    def execute_subagent(self, subtask) -> list[EvidenceItem]
+    def generate_image_report(
+        self,
+        ticker_result: TickerResearchResult,
+        company_name: str = "",
+        output_dir: str = "./image_reports",
+        mode: str = "manual",
+    ) -> ImageReportServiceResult
 ```
 
-### SubagentExecutor (subagent_executor.py)
-```python
-class SubagentExecutor:
-    def __init__(self, llm_client, market_data_service=None)
-    def execute(self, subtask: SubagentTask) -> dict  # returns raw_output dict
+### `TickerResearchResult`
+
+This is the canonical completed research object for one ticker.
+
+Phase 19 work should derive from:
+
+- `signal`
+- `report`
+- `trade_plan`
+- `decision_card`
+- `instrument_recommendation`
+- `options_structure`
+- `early_exit`
+- `watchlist_entry`
+- `validation`
+
+### `build_report_pack(...)`
+
+Defined in:
+
+- `orchestrator_reporting.py`
+
+Purpose:
+
+- convert `TickerResearchResult` into `OrchestratorReportPack`
+
+### `build_prompt_pack(...)`
+
+Defined in:
+
+- `image_prompt_builder.py`
+
+Purpose:
+
+- convert `OrchestratorReportPack` into page-by-page prompts
+
+### `ImageReportService`
+
+Defined in:
+
+- `image_report_service.py`
+
+Purpose:
+
+- orchestrate the full image-report pipeline
+
+## Upstream / Downstream
+
+### Upstream dependencies
+
+- market data providers
+- SQLite persistence
+- LLM clients
+- optional OpenAI image API via `OPENAI_API_KEY`
+
+### Downstream consumers
+
+- boss/operator workflows
+- tests in `tests/agent/research_v1/`
+- image artifact directories and manifests
+
+## Main Path
+
+Current main path:
+
+```text
+request
+-> HermesResearchApp.run()
+-> TickerResearchResult
+-> HermesResearchApp.generate_image_report()
+-> OrchestratorReportPack
+-> ImagePromptPack
+-> manual job bundle OR OpenAI image generation
 ```
 
-### MarketDataService (market_data_service.py)
-```python
-class MarketDataService:
-    def fetch_context_for_ticker(self, ticker) -> dict
-    # Returns: {market_data, candles, option_chain, _fallback_reasons}
-```
+Important:
 
-### FallbackMarketDataProvider (data/providers.py)
-```python
-class FallbackMarketDataProvider:
-    def get_last_fallback_reasons(self) -> list[str]
-```
-
-## Upstream/Downstream
-
-**Upstream dependencies** (modules that this directory depends on):
-- `futu`, `yfinance`, `akshare` — market data providers
-- `sqlite3` — persistence (stdlib)
-- LLM API clients (configured via environment)
-
-**Downstream consumers** (modules that depend on this directory):
-- `tests/agent/research_v1/` — all tests
-- `docs/` — documentation references pipeline components
-- Viewer/PDF/batch_cli all read from this directory's DB outputs
+- `viewer.py` and `report_pdf.py` are not the strategic Phase 19 mainline anymore
+- they may still exist as secondary paths
 
 ## Change Propagation
 
 | If you change | You MUST also check |
 |---|---|
-| `contracts.py` | All consumers — dataclass fields are used everywhere |
-| `app.py` | `test_app_integration.py`, `test_phase13_acceptance.py`, `test_bullish_decision_integration.py` |
-| `subagent_executor.py` | `test_market_data_service.py`, analyst files |
-| `market_data_service.py` | `test_market_data_service.py`, `subagent_executor.py` |
-| `data/providers.py` | `test_market_data_service.py`, `test_futu_provider.py` |
-| `data/database.py` | All tests using DB, `signal_pipeline.py` |
-| `final_judge.py` | `test_app_integration.py` |
-| `viewer.py` | `test_p6_viewer.py`, `test_phase13_acceptance.py` |
-| `report_pdf.py` | `test_phase13_acceptance.py` |
-| `batch_cli.py` | `test_batch_cli.py`, `test_phase13_acceptance.py` |
-| `thesis_engine.py` | `test_thesis_engine.py`, `test_bullish_decision_integration.py` |
-| `instrument_selection.py` | `test_instrument_selection.py`, `test_bullish_decision_integration.py` |
+| `app.py` | `test_app_integration.py`, `test_bullish_decision_integration.py`, `test_image_report_pipeline.py` |
+| `contracts.py` | all dataclass consumers, DB serialization, tests |
+| `orchestrator.py` | `test_orchestrator.py`, app integration |
+| `orchestrator_reporting.py` | `test_image_report_pipeline.py`, action vocabulary, locked-fact fidelity |
+| `image_report_contracts.py` | `test_image_report_pipeline.py`, service/generator imports |
+| `image_prompt_builder.py` | `test_image_report_pipeline.py`, approved action wording, page-count logic |
+| `image_report_generator.py` | `test_image_report_pipeline.py`, manifest behavior, backend mode behavior |
+| `image_report_service.py` | `test_image_report_pipeline.py`, `app.py` entrypoint behavior |
+| `viewer.py` | `test_p6_viewer.py` |
+| `report_pdf.py` | legacy compatibility checks only; do not confuse with new mainline |
 
-## Legacy Files (Frozen)
+## What NOT To Do
 
-These files exist for backwards compatibility but no new development should happen here:
+1. Do not make the image model the decision authority.
+2. Do not let prompt generation override `decision_card.primary_action`.
+3. Do not regress visible report language into generic `BUY/HOLD/SELL`.
+4. Do not treat manual job bundles as equivalent to actual generated images unless the path is explicitly manual.
+5. Do not revive the old HTML/CSS/PDF-first route as the new Phase 19 mainline.
+6. Do not change thesis/instrument/options/watchlist/validation semantics while working on report delivery.
+7. Do not add bearish actions or auto-trading.
 
-- `grading.py` — Phase 1-10 grading. Use `final_judge.py`
-- `signal_pipeline_legacy.py` — legacy persistence. Use `signal_pipeline.py`
-- `reviewer_legacy.py` — legacy review. Use `reviewer.py`
-- `trade_plan_legacy.py` — legacy trade plan. Use `trade_plan.py`
-- `researchers/` — Phase 1-4 researchers. Use `subagent_executor.py + analysts/`
+## Phase 19 Modes
 
-## Test Entry Points
+### Manual mode
+
+Use when:
+
+- validating prompts
+- no API key is configured
+- doing human-in-the-loop image generation
+
+Expected outputs:
+
+- jobs bundle JSON
+- per-page prompt files
+- manifest JSON
+
+### OpenAI mode
+
+Use when:
+
+- `OPENAI_API_KEY` is present
+- real image artifacts should be generated automatically
+
+Expected outputs:
+
+- `.png` images
+- manifest JSON
+- per-page failure isolation
+
+## Tests / Verification
+
+Run from repo root:
 
 ```bash
-# Market data service tests (Phase 12)
-pytest tests/agent/research_v1/test_market_data_service.py -v
-
-# Phase 13 acceptance
-pytest tests/agent/research_v1/test_phase13_acceptance.py -v
-
-# All research_v1 tests
-pytest tests/agent/research_v1/ -v
+python -m pytest tests/agent/research_v1/test_image_report_pipeline.py -q
+python -m pytest tests/agent/research_v1/test_bullish_decision_integration.py -q
+python -m pytest tests/agent/research_v1/test_validation_engine.py -q
+python -m pytest tests/agent/research_v1/test_watchlist_alerts.py -q
 ```
+
+If modifying report delivery logic, the image-report pipeline suite is mandatory.
+
+## What a Successor Model Must Understand
+
+A new model taking over Hermes should understand:
+
+1. `run()` produces the real research result
+2. `generate_image_report()` is the current boss-report delivery entrypoint
+3. `OrchestratorReportPack` is the content truth
+4. report generation is downstream and must not change the financial call
+5. manual and openai are both valid operating modes

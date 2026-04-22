@@ -30,6 +30,7 @@ client is configured. This module only defines the orchestration contract.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from typing import Any
 
 from agent.research_v1.task_router import TaskRouter
@@ -48,6 +49,18 @@ from agent.research_v1.contracts import (
     OutputMode,
     new_evidence_item,
 )
+
+
+def _build_default_llm_client():
+    """Return the default LLM client for normal app runs, or None if unavailable."""
+    if os.getenv("HERMES_DISABLE_AUTO_LLM", "").strip() == "1":
+        return None
+    try:
+        from agent.research_v1.llm_clients import MiniMaxClient
+        client = MiniMaxClient()
+        return client if client.api_key else None
+    except Exception:
+        return None
 from agent.research_v1.signal_pipeline import SignalPersistencePipeline
 from agent.research_v1.trade_plan import TradePlanGenerator
 from agent.research_v1.market_data_service import MarketDataService
@@ -57,6 +70,7 @@ from agent.research_v1.options_decision import OptionsDecisionEngine
 from agent.research_v1.early_exit import EarlyExitEngine
 from agent.research_v1.watchlist_alerts import WatchlistAlertCenter
 from agent.research_v1.validation_engine import ValidationEngine
+from agent.research_v1.image_report_service import ImageReportService, ImageReportServiceResult
 from agent.research_v1.contracts import (
     UnderlyingThesis,
     InstrumentRecommendation,
@@ -142,13 +156,17 @@ class HermesResearchApp:
         """
         self._router = TaskRouter()
         self._orchestrator = Orchestrator()
-        self._llm_client = llm_client
+        self._llm_client = llm_client or _build_default_llm_client()
         # Futu-first by default (Phase 12); SubagentExecutor also uses it directly
         self._market_data_service = (
             market_data_service if market_data_service is not None
             else MarketDataService()
         )
-        self._executor = SubagentExecutor(llm_client, self._market_data_service) if llm_client else None
+        self._executor = (
+            SubagentExecutor(self._llm_client, self._market_data_service)
+            if self._llm_client
+            else None
+        )
         self._evidence_store = EvidenceStore()
         self._pipeline = SignalPersistencePipeline(database=database) if database else None
         self._trade_plan_generator = TradePlanGenerator()
@@ -163,6 +181,8 @@ class HermesResearchApp:
         self._watchlist_initialized = False
         # Phase 17: validation engine
         self._validation_engine = ValidationEngine()
+        # Phase 19A: image report service (lazy — instantiated on first use)
+        self._image_report_service: ImageReportService | None = None
 
     def run(self, request: str) -> ResearchResult:
         """
@@ -445,6 +465,16 @@ class HermesResearchApp:
 
         # Add fallback reasons from MarketDataService (Phase 12: Futu-first with tracing)
         audit["fallback_reasons"] = list(ticker_context.get("_fallback_reasons") or [])
+        audit["llm_research_available"] = self._executor is not None
+        audit["llm_provider_configured"] = self._llm_client is not None
+        audit["evidence_count"] = len(evidence_items)
+        audit["coverage_limited"] = self._executor is None and len(evidence_items) == 0
+
+        if audit["coverage_limited"]:
+            errors.append(
+                "No LLM client configured; subagents were skipped. "
+                "Research output is coverage-limited."
+            )
 
         # 6. Orchestrator assemble judge packet
         try:
@@ -466,6 +496,43 @@ class HermesResearchApp:
             signal, report = judge(packet)
         except Exception as exc:
             errors.append(f"FinalJudge error: {exc}")
+
+        if report is not None and audit.get("coverage_limited"):
+            report.executive_summary = (
+                "Research unavailable: no LLM client configured, so the analyst "
+                "layer did not run. Market data may have been fetched, but it was "
+                "not synthesized into a full research judgment."
+            )
+            report.bottom_line = (
+                f"Coverage-limited fallback only for {ticker} - analyst research unavailable."
+            )
+            report.why_now = (
+                "No analyst-generated why-now is available because no research model "
+                "is configured for Hermes."
+            )
+            report.bull_case = (
+                "Research unavailable: bullish evidence was not generated because "
+                "subagents were skipped."
+            )
+            report.bear_case = (
+                "Research unavailable: bearish evidence was not generated because "
+                "subagents were skipped."
+            )
+            risk_watch = list(report.risk_watch or [])
+            risk_watch.insert(0, "Analyst layer unavailable - configure an LLM provider before trusting this run.")
+            report.risk_watch = risk_watch
+
+        if signal is not None and audit.get("coverage_limited"):
+            risk_flags = list(signal.risk_flags or [])
+            if "research_provider_unavailable" not in risk_flags:
+                risk_flags.append("research_provider_unavailable")
+            if "coverage_limited" not in risk_flags:
+                risk_flags.append("coverage_limited")
+            signal.risk_flags = risk_flags
+            signal.decision_reason = (
+                "Fallback-only signal: no LLM client configured, so subagent research "
+                "did not run."
+            )
 
         # Phase 14: Underlying Thesis + Instrument Selection
         # Runs after FinalJudge to stay additive to the canonical pipeline.
@@ -727,6 +794,65 @@ class HermesResearchApp:
 
         return items
 
+    def generate_image_report(
+        self,
+        research_result: TickerResearchResult,
+        company_name: str = "",
+        output_dir: str = "./image_reports",
+        mode: str = "manual",
+    ) -> ImageReportServiceResult:
+        """
+        Generate a Phase 19A/B image-report from a TickerResearchResult.
+
+        This is the canonical Hermes product entrypoint for the image-report
+        pipeline.
+
+        The pipeline:
+            TickerResearchResult
+                -> OrchestratorReportPack (content truth)
+                -> ImagePromptPack (generation control)
+                -> Job bundles on disk OR live OpenAI images
+
+        Phase 19A state machine:
+            - content_ready   : prompt pack built, not yet submitted
+            - job_submitted  : job bundles on disk, awaiting manual image generation
+            - artifacts_present: actual .png image files exist at recorded paths
+
+        Args:
+            research_result: Result from run() or _run_ticker_pipeline().
+            company_name: Optional company display name (falls back to ticker).
+            output_dir: Directory for job bundles and/or PNG files.
+            mode: Generation mode — "manual" (default, job bundles) or "openai" (live API).
+                "manual": writes job bundles for human-in-the-loop generation
+                "openai": calls OpenAI gpt-image-2 API to generate real .png images
+
+        Returns:
+            ImageReportServiceResult with content packs, generation result,
+            and phase_19a_job_state tracking.
+
+        Example::
+
+            app = HermesResearchApp()
+            research = app.run("Research AAPL fundamentals")
+            for tr in research.ticker_results:
+                # Manual path (Phase 19A)
+                img_result = app.generate_image_report(tr, company_name="Apple Inc.")
+                print(img_result.phase_19a_job_state)
+
+                # Live OpenAI path (Phase 19B)
+                img_result = app.generate_image_report(tr, company_name="Apple Inc.", mode="openai")
+                print(img_result.phase_19a_job_state)
+        """
+        service_mode = mode  # avoid shadowing
+        if self._image_report_service is None:
+            self._image_report_service = ImageReportService(output_dir=output_dir)
+        return self._image_report_service.run(
+            research_result=research_result,
+            company_name=company_name,
+            output_dir=output_dir,
+            mode=service_mode,
+        )
+
 
 def run_research(request: str, llm_client=None) -> ResearchResult:
     """
@@ -758,16 +884,11 @@ if __name__ == "__main__":
     request = " ".join(sys.argv[1:])
 
     # Try to get an LLM client from environment
-    llm_client = None
-    try:
-        from agent.research_v1.llm_clients import MiniMaxClient
-        llm_client = MiniMaxClient()
-    except Exception:
-        pass
+    llm_client = _build_default_llm_client()
 
     if llm_client is None:
         print("Warning: No LLM client configured. Subagents will be no-op.")
-        print("Set MINIMAX_API_KEY environment variable to enable real research.\n")
+        print("Set MINIMAX_API_KEY or a local API key file to enable real research.\n")
 
     print(f"Running research: {request}")
     print("-" * 60)

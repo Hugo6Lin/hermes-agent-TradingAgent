@@ -1,11 +1,60 @@
 """LLM client adapters for MiniMax, OpenAI, and Anthropic."""
 
+import os
+import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import requests
+
+
+DEFAULT_LOCAL_API_KEY_FILE = Path(r"D:\API_KEY\API_KEY.txt")
+
+
+def _load_local_provider_key(provider: str) -> str:
+    """Load a provider key from the local API key file if present.
+
+    Lookup order:
+        1. Provider-specific environment variable (handled by caller)
+        2. HERMES_LOCAL_API_KEY_FILE override
+        3. Default local API key file at D:\\API_KEY\\API_KEY.txt
+    """
+    file_override = os.getenv("HERMES_LOCAL_API_KEY_FILE", "").strip()
+    candidate = Path(file_override) if file_override else DEFAULT_LOCAL_API_KEY_FILE
+    if not candidate.exists() or not candidate.is_file():
+        return ""
+
+    try:
+        text = candidate.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        text = candidate.read_text(encoding="utf-8-sig")
+    except OSError:
+        return ""
+
+    provider_lower = provider.lower()
+    patterns = {
+        "minimax": [
+            r"(?im)^\s*minimax[\w.-]*\s*[：:]\s*(sk-[^\s]+)\s*$",
+            r"(?im)^\s*MINIMAX_API_KEY\s*=\s*([^\s#]+)\s*$",
+        ],
+        "openai": [
+            r"(?im)^\s*openai[\w.-]*\s*[：:]\s*(sk-[^\s]+)\s*$",
+            r"(?im)^\s*OPENAI_API_KEY\s*=\s*([^\s#]+)\s*$",
+        ],
+        "anthropic": [
+            r"(?im)^\s*anthropic[\w.-]*\s*[：:]\s*(sk-[^\s]+)\s*$",
+            r"(?im)^\s*ANTHROPIC_API_KEY\s*=\s*([^\s#]+)\s*$",
+        ],
+    }
+
+    for pattern in patterns.get(provider_lower, []):
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+    return ""
 
 
 @dataclass
@@ -107,11 +156,12 @@ class MiniMaxClient(BaseLLMClient):
     """MiniMax LLM client."""
 
     DEFAULT_BASE_URL = "https://api.minimax.chat/v1"
+    DEFAULT_MODEL = "MiniMax-M2.7-HighSpeed"
 
     def __init__(
         self,
         api_key: str = None,
-        model: str = "MiniMax-2.7",
+        model: str = DEFAULT_MODEL,
         timeout: int = 60,
         base_url: str = None
     ):
@@ -123,8 +173,7 @@ class MiniMaxClient(BaseLLMClient):
             timeout: Request timeout in seconds.
             base_url: Base URL for API. Defaults to MINIMAX_BASE_URL env var or DEFAULT_BASE_URL.
         """
-        import os
-        self.api_key = api_key or os.getenv("MINIMAX_API_KEY", "")
+        self.api_key = api_key or os.getenv("MINIMAX_API_KEY", "") or _load_local_provider_key("minimax")
         self.model = model
         self.timeout = timeout
         self.base_url = base_url or os.getenv("MINIMAX_BASE_URL", self.DEFAULT_BASE_URL)

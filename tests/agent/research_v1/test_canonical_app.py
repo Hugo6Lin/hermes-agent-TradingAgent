@@ -174,11 +174,16 @@ class TestHermesResearchAppRun:
         assert tr.ticker == "MSFT"
         # Pipeline completes without raising errors
         assert len(result.errors) == 0
-        # FinalJudge produces SELL with low confidence for empty evidence
+        # FinalJudge may still emit a fallback signal, but the run must be
+        # explicitly marked as coverage-limited.
         assert tr.signal is not None
-        assert tr.signal.rating == "SELL"
-        assert tr.signal.confidence < 0.5
         assert tr.report is not None
+        assert tr.audit["llm_research_available"] is False
+        assert tr.audit["coverage_limited"] is True
+        assert tr.audit["evidence_count"] == 0
+        assert any("No LLM client configured" in err for err in tr.errors)
+        assert "Research unavailable" in tr.report.executive_summary
+        assert "Coverage-limited" in tr.report.bottom_line
 
     def test_run_request_text_preserved(self):
         """Original request text is preserved through pipeline."""

@@ -208,3 +208,14 @@ __marimo__/
 
 # Git worktrees
 .worktrees/
+
+# Local operator/runtime artifacts
+image_reports/
+validation_output/
+.claude/
+skills/
+
+# Local validation scratch files
+validation_script.py
+validation_html_export.py
+hermes-operator-promot-v1.md
