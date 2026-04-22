@@ -37,6 +37,56 @@ It does this in two layers:
 | OpenAI image-report automation | Shipped |
 | Legacy viewer / PDF surfaces | Secondary / compatibility only |
 
+## Current Bottleneck
+
+Hermes is no longer blocked primarily by workflow architecture.
+
+The next bottleneck is **P20: factor calibration and model routing**:
+
+- fundamentals quality is still too sensitive to sparse analyst evidence
+- thin evidence can be misread as `No Trade`
+- thesis classification needs a clearer separation between:
+  - genuine `No Trade`
+  - `Inconclusive` / insufficient coverage
+- analyst roles should be routed to models strong enough for the task
+
+In short:
+
+- **P19 solved delivery**
+- **P20 is about improving decision quality**
+
+## Near-Term P20 Optimization Goals
+
+Hermes' next phase focuses on making the research engine more factor-aware and more honest about evidence quality.
+
+Planned P20 improvements:
+
+1. **Separate `Inconclusive` from `No Trade`**
+   - insufficient evidence should not be presented as a deliberate negative conclusion
+
+2. **Replace fragile fundamentals quality scoring**
+   - move away from simple evidence-count-style scoring
+   - introduce factorized fundamentals dimensions such as:
+     - profitability quality
+     - growth quality
+     - cash flow quality
+     - balance sheet quality
+     - capital allocation
+     - valuation support
+     - evidence coverage
+
+3. **Make coverage explicit**
+   - show what dimensions were covered
+   - show what dimensions were missing
+   - expose classification reason more clearly
+
+4. **Introduce model routing by analyst role**
+   - stronger models for fundamentals
+   - lighter models where appropriate for technical/news/other structured roles
+
+5. **Improve thesis-state calibration**
+   - make thesis outputs more stable, interpretable, and decision-useful
+
 ## Main Runtime Flow
 
 ```mermaid
@@ -138,4 +188,5 @@ If you are a model, agent, or operator newly entering this repository:
 - [agent/research_v1/README.md](/E:/hermes-agent/agent/research_v1/README.md)
 - [agent/research_v1/AGENT.md](/E:/hermes-agent/agent/research_v1/AGENT.md)
 - [P19 image-report spec](/E:/hermes-agent/docs/superpowers/specs/2026-04-22-hermes-image-report-pipeline-spec.md)
+- [P20 factor calibration and model routing spec](/E:/hermes-agent/docs/superpowers/specs/2026-04-23-hermes-factor-calibration-and-model-routing-spec.md)
 - [Boss operator prompt](/E:/hermes-agent/docs/boss-model-handoff-prompt.md)

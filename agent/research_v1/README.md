@@ -36,6 +36,15 @@ Hermes now has two distinct layers:
 
 The old HTML/CSS/PDF-first report direction is no longer the main Phase 19 architecture.
 
+Hermes is now entering **P20: factor calibration and model routing**.
+
+That means the next core engineering problem is no longer "how to deliver the report",
+but rather:
+
+- how fundamentals quality should be scored
+- how to distinguish insufficient coverage from true `No Trade`
+- how to route analyst roles to stronger or lighter models appropriately
+
 ## Main Flow
 
 ```mermaid
