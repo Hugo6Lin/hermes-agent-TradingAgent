@@ -172,10 +172,30 @@ class ResearchDatabase:
                 max_drawdown_pct REAL NOT NULL,
                 win BOOLEAN NOT NULL,
                 gap_handled BOOLEAN NOT NULL DEFAULT FALSE,
+                schema_version TEXT DEFAULT 'legacy_p1',
+                gross_return_pct REAL,
+                net_return_pct REAL,
+                transaction_cost_pct REAL DEFAULT 0.0,
+                cost_source TEXT DEFAULT 'none',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
             )
         """)
+
+        # Idempotent migration: add P20 columns to existing signal_outcomes table
+        for col_def in [
+            ("schema_version", "TEXT DEFAULT 'legacy_p1'"),
+            ("gross_return_pct", "REAL"),
+            ("net_return_pct", "REAL"),
+            ("transaction_cost_pct", "REAL DEFAULT 0.0"),
+            ("cost_source", "TEXT DEFAULT 'none'"),
+        ]:
+            col_name, col_type = col_def
+            try:
+                cursor.execute(f"ALTER TABLE signal_outcomes ADD COLUMN {col_name} {col_type}")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
         # positions table
         cursor.execute("""
@@ -683,17 +703,27 @@ class ResearchDatabase:
         return_pct: float,
         max_drawdown_pct: float,
         win: bool,
-        gap_handled: bool
+        gap_handled: bool,
+        schema_version: str = "p20.1",
+        gross_return_pct: float | None = None,
+        net_return_pct: float | None = None,
+        transaction_cost_pct: float = 0.0,
+        cost_source: str = "none",
     ) -> int:
         """Persist a computed signal outcome. Returns outcome_id."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        # Default gross/net to return_pct if not provided
+        gross_val = gross_return_pct if gross_return_pct is not None else return_pct
+        net_val = net_return_pct if net_return_pct is not None else return_pct
         cursor.execute(
             """
             INSERT INTO signal_outcomes (
                 signal_id, horizon_days, exit_price, return_pct,
-                max_drawdown_pct, win, gap_handled
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                max_drawdown_pct, win, gap_handled,
+                schema_version, gross_return_pct, net_return_pct,
+                transaction_cost_pct, cost_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 signal_id,
@@ -703,6 +733,11 @@ class ResearchDatabase:
                 max_drawdown_pct,
                 int(win),
                 int(gap_handled),
+                schema_version,
+                gross_val,
+                net_val,
+                transaction_cost_pct,
+                cost_source,
             )
         )
         outcome_id = cursor.lastrowid
@@ -1555,3 +1590,88 @@ class ResearchDatabase:
         row = cursor.fetchone()
         conn.close()
         return dict(row) if row else None
+
+    # -------------------------------------------------------------------------
+    # P20: Factor calibration schema
+    # -------------------------------------------------------------------------
+
+    def initialize_factor_schema(self) -> None:
+        """Initialize P20 factor tables: factor_snapshots, forward_return_observations, universe_membership_snapshots."""
+        from agent.research_v1.factor_persistence import initialize_factor_schema as _init
+        conn = self._get_connection()
+        try:
+            _init(conn)
+        finally:
+            conn.close()
+
+    def save_factor_snapshot(self, snapshot: "FactorSnapshot") -> None:
+        """Persist a FactorSnapshot. Calls factor_persistence layer."""
+        from agent.research_v1.factor_persistence import save_factor_snapshot as _save
+        conn = self._get_connection()
+        try:
+            _save(conn, snapshot)
+        finally:
+            conn.close()
+
+    def get_factor_snapshot(self, snapshot_id: str) -> Optional["FactorSnapshot"]:
+        """Retrieve a FactorSnapshot by ID."""
+        from agent.research_v1.factor_persistence import get_factor_snapshot as _get
+        conn = self._get_connection()
+        try:
+            return _get(conn, snapshot_id)
+        finally:
+            conn.close()
+
+    def get_latest_factor_snapshot(self, ticker: str, trading_day: str) -> Optional["FactorSnapshot"]:
+        """Get latest FactorSnapshot for ticker+trading_day dedup key."""
+        from agent.research_v1.factor_persistence import get_latest_factor_snapshot as _get
+        conn = self._get_connection()
+        try:
+            return _get(conn, ticker, trading_day)
+        finally:
+            conn.close()
+
+    def save_forward_return_observation(self, obs: "ForwardReturnObservation") -> None:
+        """Persist a ForwardReturnObservation."""
+        from agent.research_v1.factor_persistence import save_forward_return_observation as _save
+        conn = self._get_connection()
+        try:
+            _save(conn, obs)
+        finally:
+            conn.close()
+
+    def get_forward_return_observations(self, snapshot_id: str) -> list:
+        """Retrieve all ForwardReturnObservations for a snapshot."""
+        from agent.research_v1.factor_persistence import get_forward_return_observations as _get
+        conn = self._get_connection()
+        try:
+            return _get(conn, snapshot_id)
+        finally:
+            conn.close()
+
+    def get_forward_return_observations_by_ticker(self, ticker: str, horizon_days: int | None = None) -> list:
+        """Retrieve forward return observations for a ticker."""
+        from agent.research_v1.factor_persistence import get_forward_return_observations_by_ticker as _get
+        conn = self._get_connection()
+        try:
+            return _get(conn, ticker, horizon_days)
+        finally:
+            conn.close()
+
+    def save_universe_membership_snapshot(self, snapshot: "UniverseMembershipSnapshot") -> None:
+        """Persist a UniverseMembershipSnapshot."""
+        from agent.research_v1.factor_persistence import save_universe_membership_snapshot as _save
+        conn = self._get_connection()
+        try:
+            _save(conn, snapshot)
+        finally:
+            conn.close()
+
+    def get_universe_membership_snapshot(self, snapshot_id: str) -> Optional["UniverseMembershipSnapshot"]:
+        """Retrieve a UniverseMembershipSnapshot by ID."""
+        from agent.research_v1.factor_persistence import get_universe_membership_snapshot as _get
+        conn = self._get_connection()
+        try:
+            return _get(conn, snapshot_id)
+        finally:
+            conn.close()

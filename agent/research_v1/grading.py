@@ -2,27 +2,39 @@
 
 from datetime import datetime, timedelta, timezone
 
-from typing import Any
+from typing import Any, Dict, Optional
 
 from agent.research_v1.llm_clients import BaseLLMClient
+from agent.research_v1.exit_planning import ExitPlanConfig, build_exit_plan
+from agent.research_v1.calibration_config import GradingWeightConfig
 
 
 class GradingAgent:
     """Grading agent - assigns S/A/B/C grades."""
 
-    # Weights for composite score calculation
-    FUNDAMENTAL_WEIGHT = 0.40
-    TECHNICAL_WEIGHT = 0.30
-    MACRO_WEIGHT = 0.30
+    # Default weights (exposed as class constants for backward compatibility)
+    FUNDAMENTAL_WEIGHT = GradingWeightConfig().fundamental
+    TECHNICAL_WEIGHT = GradingWeightConfig().technical
+    MACRO_WEIGHT = GradingWeightConfig().macro
 
-    def __init__(self, llm_client: BaseLLMClient, dynamic_weights: dict[str, float] | None = None):
+    def __init__(
+        self,
+        llm_client: BaseLLMClient,
+        dynamic_weights: Optional[Dict[str, float]] = None,
+        grading_weights: Optional[GradingWeightConfig] = None,
+    ):
         """Initialize GradingAgent.
 
         Args:
             llm_client: LLM client for generating grading analysis.
+            dynamic_weights: Optional per-run weight overrides (fundamental/technical/macro).
+            grading_weights: Optional calibration config for composite weights.
         """
         self.llm = llm_client
         self.dynamic_weights = dynamic_weights or {}
+        self.grading_weights = grading_weights or GradingWeightConfig()
+        if self.dynamic_weights:
+            self.grading_weights = self.grading_weights.with_overrides(self.dynamic_weights)
         self.fundamental_weight, self.technical_weight, self.macro_weight = self._resolve_weights()
 
     def grade(self, research_decision: dict, analyst_reports: dict) -> dict:
@@ -72,36 +84,33 @@ class GradingAgent:
         }
 
     def _score_fundamentals(self, fundamentals_summary: dict) -> float:
-        """Score fundamentals 0-100.
+        """Score fundamentals 0-100 using bounded LLM verdict overlay.
 
         Args:
-            fundamentals_summary: Summary dict with verdict and confidence.
+            fundamentals_summary: Summary dict with base_score, verdict, and confidence.
 
         Returns:
-            Score from 0-100.
+            Score from 0-100 with bounded overlay applied.
         """
         if not fundamentals_summary:
-            return 50.0  # Default neutral score
+            return 50.0
 
-        verdict = fundamentals_summary.get("verdict", "unknown")
-        confidence = fundamentals_summary.get("confidence", 0.5)
+        base_score = float(fundamentals_summary.get("base_score", 50.0))
+        verdict = str(fundamentals_summary.get("verdict", "unknown")).lower()
+        confidence = float(fundamentals_summary.get("confidence", 0.5))
 
-        # Map verdict to base score
-        verdict_scores = {
-            "strong_buy": 95,
-            "buy": 80,
-            "hold": 60,
-            "sell": 40,
-            "strong_sell": 20,
-            "unknown": 50
-        }
+        verdict_overlay = {
+            "strong_buy": 15.0,
+            "buy": 10.0,
+            "hold": 0.0,
+            "sell": -10.0,
+            "strong_sell": -15.0,
+            "unknown": 0.0,
+        }.get(verdict, 0.0)
 
-        base_score = verdict_scores.get(verdict.lower(), 50)
-
-        # Adjust by confidence (0-1 scale mapped to +/- 10 points)
-        confidence_adjustment = (confidence - 0.5) * 20
-
-        return max(0, min(100, base_score + confidence_adjustment))
+        confidence_scale = max(0.0, min(1.0, confidence))
+        signed_overlay = verdict_overlay * confidence_scale
+        return max(0.0, min(100.0, base_score + signed_overlay))
 
     def _score_technical(self, technical_summary: dict) -> float:
         """Score technicals 0-100.
@@ -232,14 +241,12 @@ class GradingAgent:
         }
 
     def _resolve_weights(self) -> tuple[float, float, float]:
-        """Resolve optional dynamic weights while preserving normalization."""
-        f = float(self.dynamic_weights.get("fundamental", self.FUNDAMENTAL_WEIGHT))
-        t = float(self.dynamic_weights.get("technical", self.TECHNICAL_WEIGHT))
-        m = float(self.dynamic_weights.get("macro", self.MACRO_WEIGHT))
-        total = f + t + m
-        if total <= 0:
-            return self.FUNDAMENTAL_WEIGHT, self.TECHNICAL_WEIGHT, self.MACRO_WEIGHT
-        return f / total, t / total, m / total
+        """Return grading weights from the (possibly override-merged) config."""
+        return (
+            self.grading_weights.fundamental,
+            self.grading_weights.technical,
+            self.grading_weights.macro,
+        )
 
     def _determine_grade(self, composite_score: float, fundamental_score: float) -> str:
         """Determine letter grade from scores.
@@ -297,16 +304,27 @@ class GradingAgent:
         if warning_summary:
             warnings.append(warning_summary)
 
+        # Build ATR-adaptive exit plan
+        technical_summary = research_decision.get("technical_summary", {})
+        exit_plan = build_exit_plan(
+            entry_price=current_price,
+            atr_20=technical_summary.get("atr_20") or technical_summary.get("atr"),
+            realized_vol_20d=technical_summary.get("realized_vol_20d"),
+            holding_horizon=holding_horizon,
+            config=ExitPlanConfig(),
+        )
+
         return {
             "symbol": symbol,
             "entry_price": current_price,
-            "stop_loss": round(current_price * 0.93, 2) if current_price else 0.0,
-            "take_profit": round(current_price * 1.12, 2) if current_price else 0.0,
+            "stop_loss": exit_plan.stop_loss,
+            "take_profit": exit_plan.take_profit,
             "holding_horizon": holding_horizon,
             "signal_valid_until": signal_valid_until,
             "priority_score": priority_score,
             "confidence": confidence,
             "warnings": warnings,
+            "exit_plan": exit_plan.to_dict(),
         }
 
     def _determine_holding_horizon(self, grade: str) -> str:

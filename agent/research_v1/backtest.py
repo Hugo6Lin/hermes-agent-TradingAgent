@@ -1,17 +1,48 @@
 """Minimal P1 backtest helpers for signal outcome calculation."""
 
+from __future__ import annotations
+
 from statistics import median
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent.research_v1.cost_model import CostModel
+
+
+def _max_drawdown_until(points: list[dict], entry_price: float) -> float:
+    """Peak-to-trough drawdown from entry price through the given points."""
+    if not points or entry_price <= 0:
+        return 0.0
+    peak = float(entry_price)
+    max_drawdown = 0.0
+    for point in points:
+        close = float(point["close"])
+        peak = max(peak, close)
+        drawdown = (close - peak) / peak if peak else 0.0
+        max_drawdown = min(max_drawdown, drawdown)
+    return max_drawdown
 
 
 def compute_signal_outcomes(
     signal: dict,
     price_points: list[dict],
     horizons: tuple[int, ...] = (5, 20, 60),
+    cost_model: "CostModel | None" = None,
 ) -> dict[int, dict]:
-    """Compute forward outcomes from ordered price points."""
-    entry_price = signal["entry_price"]
+    """Compute forward outcomes from ordered price points.
+
+    Args:
+        signal: Dict with entry_price, and optionally adv_shares_20d and position_shares.
+        price_points: Ordered list of dicts with 'day' and 'close' keys.
+        horizons: Tuple of horizon day counts to evaluate.
+        cost_model: Optional CostModel for net-return calculation.
+
+    Returns:
+        Dict mapping horizon -> outcome dict with schema_version, gross/net returns,
+        drawdown, win flag, and cost fields.
+    """
+    entry_price = float(signal.get("entry_price") or 0.0)
     normalized = sorted(price_points, key=lambda item: item["day"])
-    drawdown_floor = min(point["close"] for point in normalized) if normalized else entry_price
 
     outcomes = {}
     for horizon in horizons:
@@ -19,15 +50,42 @@ def compute_signal_outcomes(
         if target_point is None:
             continue
         gap_handled = target_point["day"] != horizon
-        exit_price = target_point["close"]
-        return_pct = (exit_price - entry_price) / entry_price if entry_price else 0.0
-        max_drawdown_pct = (drawdown_floor - entry_price) / entry_price if entry_price else 0.0
+        exit_price = float(target_point["close"])
+        gross_return_pct = (exit_price - entry_price) / entry_price if entry_price else 0.0
+
+        # Cost payload
+        cost_payload = {
+            "gross_return_pct": gross_return_pct,
+            "net_return_pct": gross_return_pct,
+            "transaction_cost_pct": 0.0,
+            "cost_source": "none",
+        }
+        if cost_model is not None:
+            applied = cost_model.apply(
+                gross_return_pct=gross_return_pct,
+                adv_shares_20d=signal.get("adv_shares_20d"),
+                position_shares=signal.get("position_shares"),
+            )
+            cost_payload.update(applied)
+            cost_payload["cost_source"] = cost_model.__class__.__name__
+
+        return_pct = cost_payload["net_return_pct"]
+
+        # Peak-to-trough drawdown through path up to and including target
+        path_points = [point for point in normalized if point["day"] <= target_point["day"]]
+        max_drawdown_pct = _max_drawdown_until(path_points, entry_price)
+
         outcomes[horizon] = {
             "exit_price": exit_price,
             "return_pct": return_pct,
             "max_drawdown_pct": max_drawdown_pct,
             "win": return_pct > 0,
             "gap_handled": gap_handled,
+            "schema_version": "p20.1",
+            "gross_return_pct": cost_payload["gross_return_pct"],
+            "net_return_pct": cost_payload["net_return_pct"],
+            "transaction_cost_pct": cost_payload["transaction_cost_pct"],
+            "cost_source": cost_payload["cost_source"],
         }
     return outcomes
 

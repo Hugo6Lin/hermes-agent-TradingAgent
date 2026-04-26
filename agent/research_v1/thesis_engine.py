@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agent.research_v1.contracts import UnderlyingThesis
+from agent.research_v1.calibration_config import ThesisThresholdConfig
 
 
 class ThesisEngine:
@@ -24,6 +25,10 @@ class ThesisEngine:
     Takes fundamental, valuation, and catalyst inputs and produces an
     UnderlyingThesis classification.
     """
+
+    def __init__(self, thresholds: ThesisThresholdConfig | None = None):
+        """Initialize ThesisEngine with optional threshold config."""
+        self.thresholds = thresholds or ThesisThresholdConfig()
 
     def evaluate(
         self,
@@ -66,13 +71,12 @@ class ThesisEngine:
         )
 
     def _quality_score(self, fundamentals: dict) -> float:
-        """Average of available fundamental quality indicators."""
+        """Quality score normalized by expected field count, penalizing missing dimensions."""
         keys = ["profitability", "balance_sheet", "earnings_quality", "capital_allocation", "industry_position"]
-        scores = [fundamentals.get(k, 0.0) for k in keys]
-        valid = [s for s in scores if s > 0.0]
-        if not valid:
+        if not keys:
             return 0.0
-        return sum(valid) / len(valid)
+        scores = [float(fundamentals.get(k, 0.0) or 0.0) for k in keys]
+        return max(0.0, min(1.0, sum(scores) / len(keys)))
 
     def _classify(
         self,
@@ -81,9 +85,13 @@ class ThesisEngine:
         catalyst_score: float,
     ) -> str:
         """Classify the stock based on quality, valuation, and catalyst scores."""
-        if quality < 0.35:
+        if quality < self.thresholds.no_trade_quality_threshold:
             return "No Trade"
-        if quality >= 0.65 and valuation_score >= 0.15 and catalyst_score >= 0.5:
+        if (
+            quality >= self.thresholds.investable_quality_threshold
+            and valuation_score >= self.thresholds.investable_valuation_threshold
+            and catalyst_score >= self.thresholds.investable_catalyst_threshold
+        ):
             return "Investable"
         return "Watchlist"
 

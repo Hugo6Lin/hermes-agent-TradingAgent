@@ -711,6 +711,176 @@ class ValidationResult:
             raise ValueError(f"validation_confidence must be 0.0-1.0; got {self.validation_confidence!r}")
 
 
+# ---------------------------------------------------------------------------
+# P20: Factor Calibration Contracts
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class LLMAdjustment:
+    """
+    P20: A bounded, signed, auditable adjustment applied by LLM analysis.
+
+    LLM adjustments are overlays on top of hard-data base scores.
+    They must not replace the base score directly and must be logged with reason.
+    """
+    affected_category: str          # "quality" | "valuation" | "timing" | "regime"
+    delta: float                   # signed adjustment amount
+    max_abs_delta: float           # upper bound on |delta|
+    reason: str
+    source_refs: list[str]
+    model_provider: str
+    model_name: str
+    prompt_version: str
+
+    def __post_init__(self):
+        if abs(self.delta) > self.max_abs_delta:
+            raise ValueError(f"|delta| {abs(self.delta)} exceeds max_abs_delta {self.max_abs_delta}")
+
+
+@dataclass(frozen=True)
+class ThesisGateResult:
+    """
+    P20: Result of a single gate evaluation in the classification logic.
+    """
+    gate: str                        # "coverage" | "regime" | "quality" | "valuation" | "timing"
+    status: str                     # "passed" | "failed" | "stubbed" | "insufficient_definition"
+    score: float
+    threshold: float
+    failing_dimension: str | None   # which sub-dimension failed, if any
+    reason_code: str                 # machine-readable reason
+    recommended_action: str          # what to do to resolve the failure
+
+
+@dataclass(frozen=True)
+class ClassificationReason:
+    """
+    P20: Structured classification reason replacing free-text summaries.
+    """
+    classification: str                      # "Investable" | "Watchlist" | "Inconclusive" | "No Trade"
+    primary_gate: str                       # which gate drove the decision
+    primary_reason_code: str                # machine-readable primary reason
+    supporting_gates: list[str]            # list of gates that contributed positively
+    blocking_gates: list[str]              # list of gates that blocked stronger classification
+    recommended_next_action: str
+    human_summary: str                      # free-text summary for human readers
+
+
+@dataclass(frozen=True)
+class SourceValueRef:
+    """
+    P20: Structured reference to the source of a factor value.
+
+    Enables later audit and traceability of factor scores to raw data.
+    """
+    field_name: str
+    value: float | None
+    source: str                            # e.g. "yahoo_finance", "futu_opend", "analyst_report"
+    fetched_at: str                        # ISO timestamp
+    as_of_date: str                       # trading day or data date
+    provider: str                          # e.g. "Futu", "YahooFinance"
+    quality_flags: list[str]              # e.g. "stale", "missing", "estimated"
+
+
+@dataclass
+class FactorSnapshot:
+    """
+    P20: Core factor logging object. Persisted for future IC, ICIR, decay,
+    autocorrelation, and orthogonality diagnostics.
+
+    The canonical key for deduplication is:
+    (ticker, trading_day, universe_membership_snapshot_id)
+    """
+    snapshot_id: str
+    schema_version: str
+    task_id: str
+    ticker: str
+    as_of_timestamp: str
+    trading_day: str
+    data_as_of_date: str
+    universe_id: str | None
+    universe_label: str | None
+    universe_membership_snapshot_id: str
+    company_quality_score: float
+    valuation_attractiveness_score: float
+    timing_market_fit_score: float
+    quality_coverage: float
+    valuation_coverage: float
+    timing_coverage: float
+    regime_coverage: float
+    llm_overlay_coverage: float
+    llm_adjustment_total: float
+    llm_adjustments: list[LLMAdjustment]
+    gate_results: list[ThesisGateResult]
+    classification: str
+    classification_reason: ClassificationReason
+    negative_signal_strength_decile: int | None  # 1-10, or None if not computed
+    thresholds_used: dict
+    model_routes_used: dict
+    source_refs: list[SourceValueRef]
+    created_at: str
+    # Optional fields
+    raw_factor_values: dict | None = None
+    normalized_factor_values: dict | None = None
+    missing_dimensions: list[str] | None = None
+    stale_dimensions: list[str] | None = None
+    fallback_reasons: list[str] | None = None
+    provider_versions: dict | None = None
+    prompt_versions: dict | None = None
+    sector_id: str | None = None
+    size_decile: int | None = None
+
+
+@dataclass
+class ForwardReturnObservation:
+    """
+    P20: Persisted forward return for a factor snapshot.
+
+    P22 IC/ICIR/decay jobs consume this table rather than reading price history.
+    Supported horizons: 1, 5, 21, 63 trading days.
+
+    gross_return_pct / net_return_pct / transaction_cost_pct / cost_source allow
+    P22 to audit gross IC vs net IC without re-running a cost model.
+    """
+    observation_id: str
+    snapshot_id: str                     # links to FactorSnapshot.snapshot_id
+    ticker: str
+    trading_day: str
+    horizon_days: int                   # 1 | 5 | 21 | 63
+    return_value: float                 # alias for gross_return_pct for backward compat
+    return_source: str                  # "close_to_close" | "vwap" | etc.
+    price_start: float
+    price_end: float
+    start_price_date: str
+    end_price_date: str
+    gap_handled: bool
+    computed_at: str
+    # P22-required cost awareness fields
+    gross_return_pct: float              # return before transaction costs
+    net_return_pct: float               # return after transaction costs
+    transaction_cost_pct: float         # cost component (gross - net)
+    cost_source: str | None             # "CostModel" | "fixed" | "none"; None when status != "computed"
+    # If horizon could not be computed, observation may still be persisted with:
+    observation_status: str | None = None  # "computed" | "missing_horizon" | "gap_unresolvable"
+    missing_reason: str | None = None
+
+
+@dataclass
+class UniverseMembershipSnapshot:
+    """
+    P20: Point-in-time universe membership to avoid look-ahead bias.
+
+    Diagnostics must use the point-in-time membership linked from FactorSnapshot,
+    not today's index membership.
+    """
+    universe_membership_snapshot_id: str
+    universe_id: str
+    universe_label: str
+    as_of_timestamp: str
+    members: list[str]                   # list of ticker symbols
+    source: str                          # e.g. "sp500_constituents", "custom_universe"
+    created_at: str
+
+
 def new_subagent_task(
     task_id: str,
     agent_role: AgentRole,

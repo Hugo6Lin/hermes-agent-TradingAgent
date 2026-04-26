@@ -1,6 +1,9 @@
 """P1 backtest pipeline from persisted signals to persisted outcomes."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from agent.research_v1.backtest import (
     compute_signal_outcomes,
@@ -9,6 +12,9 @@ from agent.research_v1.backtest import (
 )
 from agent.research_v1.data.database import ResearchDatabase
 
+if TYPE_CHECKING:
+    from agent.research_v1.cost_model import CostModel
+
 
 @dataclass
 class BacktestPipeline:
@@ -16,9 +22,13 @@ class BacktestPipeline:
 
     database: ResearchDatabase
     historical_data_source: object
+    cost_model: "CostModel | None" = None
 
     def backtest_signal(self, signal_id: int, start_date: str, end_date: str) -> dict:
-        """Backtest one persisted signal and store computed outcomes."""
+        """Backtest one persisted signal and store computed outcomes.
+
+        When cost_model is set, outcomes include gross/net returns and cost metadata.
+        """
         signal = self.database.get_signal(signal_id)
         if signal is None:
             raise ValueError(f"Unknown signal_id: {signal_id}")
@@ -28,7 +38,11 @@ class BacktestPipeline:
             start_date=start_date,
             end_date=end_date,
         )
-        computed_outcomes = compute_signal_outcomes(signal=signal, price_points=price_points)
+        computed_outcomes = compute_signal_outcomes(
+            signal=signal,
+            price_points=price_points,
+            cost_model=self.cost_model,
+        )
 
         persisted_outcomes = []
         summary_by_horizon = {}
@@ -41,6 +55,11 @@ class BacktestPipeline:
                 max_drawdown_pct=outcome["max_drawdown_pct"],
                 win=outcome["win"],
                 gap_handled=outcome["gap_handled"],
+                schema_version=outcome.get("schema_version", "p20.1"),
+                gross_return_pct=outcome.get("gross_return_pct", outcome["return_pct"]),
+                net_return_pct=outcome.get("net_return_pct", outcome["return_pct"]),
+                transaction_cost_pct=outcome.get("transaction_cost_pct", 0.0),
+                cost_source=outcome.get("cost_source", "none"),
             )
             persisted = dict(outcome)
             persisted["outcome_id"] = outcome_id

@@ -1,5 +1,9 @@
 """Standalone valuation models for Hermes P4."""
 
+from __future__ import annotations
+
+from agent.research_v1.calibration_config import SectorBenchmarkConfig
+
 
 def calculate_dcf_value(
     free_cash_flows: list[float],
@@ -52,27 +56,59 @@ def calculate_relative_valuation(
     market_data: dict,
     benchmark_multiples: dict,
 ) -> dict:
-    """Estimate target price from peer multiples."""
+    """Estimate target price from peer multiples.
+
+    Args:
+        market_data: Dict with eps, book_value_per_share, sales_per_share keys.
+        benchmark_multiples: Dict with pe/pb/ps multiples, or a 'sector' key to
+            trigger sector-indexed benchmark lookup via SectorBenchmarkConfig.
+
+    Returns:
+        Dict with 'methods' (per-multiple target prices), 'target_price',
+        and 'benchmark_metadata'.
+    """
+    benchmark_metadata = {
+        "calibration_status": "prior_only",
+        "config_version": "p21.0",
+        "sector": None,
+        "resolved_sector": None,
+        "used_fallback": False,
+    }
+
+    multiples = dict(benchmark_multiples)
+
+    # If benchmark_multiples contains sector but no direct multiples, look up via config
+    if "sector" in benchmark_multiples and not any(k in benchmark_multiples for k in ("pe", "pb", "ps")):
+        payload = SectorBenchmarkConfig().get(benchmark_multiples["sector"])
+        multiples = payload["multiples"]
+        benchmark_metadata = {k: v for k, v in payload.items() if k != "multiples"}
+
     methods = {}
 
     eps = market_data.get("eps")
-    if eps is not None and benchmark_multiples.get("pe") is not None:
-        methods["pe"] = eps * benchmark_multiples["pe"]
+    if eps is not None and multiples.get("pe") is not None:
+        methods["pe"] = eps * multiples["pe"]
 
     book_value_per_share = market_data.get("book_value_per_share")
-    if book_value_per_share is not None and benchmark_multiples.get("pb") is not None:
-        methods["pb"] = book_value_per_share * benchmark_multiples["pb"]
+    if book_value_per_share is not None and multiples.get("pb") is not None:
+        methods["pb"] = book_value_per_share * multiples["pb"]
 
     sales_per_share = market_data.get("sales_per_share")
-    if sales_per_share is not None and benchmark_multiples.get("ps") is not None:
-        methods["ps"] = sales_per_share * benchmark_multiples["ps"]
+    if sales_per_share is not None and multiples.get("ps") is not None:
+        methods["ps"] = sales_per_share * multiples["ps"]
 
     if not methods:
-        return {"methods": {}, "target_price": None}
+        return {"methods": {}, "target_price": None, "benchmark_metadata": benchmark_metadata}
 
     target_price = sum(methods.values()) / len(methods)
     rounded_methods = {name: round(value, 4) for name, value in methods.items()}
     return {
         "methods": rounded_methods,
         "target_price": round(target_price, 4),
+        "benchmark_metadata": benchmark_metadata,
     }
+
+
+def get_sector_benchmark_multiples(sector: str | None) -> dict:
+    """Return benchmark multiples for a given sector, delegating to SectorBenchmarkConfig."""
+    return SectorBenchmarkConfig().get(sector)["multiples"]
