@@ -172,9 +172,21 @@ def _build_result(
 
 def run_daily_governance(request: DailyGovernanceRequest) -> DailyGovernanceResult:
     version_dossier = build_version_readiness_dossier(request.version_request)
+    actual_version_status = version_dossier.to_dict()["status"]
+    # Derive family readiness from actual version dossier status, not caller input.
+    # P31 design: VersionReadinessDossier -> SignalFamilyReadinessDossier[];
+    # family review chain is only valid when version is ready_for_human_review.
     family_dossiers = tuple(
-        build_signal_family_readiness_dossier(family_request)
-        for family_request in request.family_requests
+        build_signal_family_readiness_dossier(
+            SignalFamilyReadinessRequest(
+                parent_version_status=actual_version_status,
+                family_type=fr.family_type,
+                family_namespace=fr.family_namespace,
+                evidence=fr.evidence,
+                notes=fr.notes,
+            )
+        )
+        for fr in request.family_requests
     )
     output_dir = request.output_root / request.run_date
 
