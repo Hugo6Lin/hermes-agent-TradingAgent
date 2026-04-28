@@ -123,12 +123,17 @@ def build_signal_family_edge_review(
 
     # ── P28 execution realism required when policy demands it ──────────────────
     p28_rec = records.get("p28_execution_realism_report")
+    if policy.require_execution_realism:
+        if p28_rec is None or p28_rec.status != "present":
+            missing_artifacts.append("missing_artifact:p28_execution_realism_report")
 
     # ── P25/P26 required for shadow model families ──────────────────────────────
     if family_type == "shadow_model_family":
-        if records.get("p25_shadow_training_result") is None:
+        p25_rec = records.get("p25_shadow_training_result")
+        if p25_rec is None or p25_rec.status != "present":
             missing_artifacts.append("missing_artifact:p25_shadow_training_result")
-        if records.get("p26_shadow_portfolio_report") is None:
+        p26_rec = records.get("p26_shadow_portfolio_report")
+        if p26_rec is None or p26_rec.status != "present":
             missing_artifacts.append("missing_artifact:p26_shadow_portfolio_report")
 
     # ── Determine status ────────────────────────────────────────────────────────

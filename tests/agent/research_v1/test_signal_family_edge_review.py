@@ -153,6 +153,86 @@ def test_mature_net_evidence_ready_for_human_review():
     assert report.allowed_next_step == "prepare_human_review"
 
 
+def test_missing_p28_blocks_positive_review_when_required():
+    # P28 is absent entirely — with require_execution_realism=True,
+    # this must block a positive human-review status.
+    report = build_signal_family_edge_review(
+        SignalFamilyEdgeReviewRequest(
+            family_namespace="factor_family.quality",
+            family_type="factor_family",
+            registry_report=_registry((
+                _record("p22_validity_report", "P22", details={
+                    "return_basis": "net_return_pct",
+                    "observation_count": 100,
+                    "net_ic_positive": True,
+                }),
+                # no p28_execution_realism_report
+            )),
+            policy=_policy(),
+        )
+    )
+    assert report.status == "blocked_missing_evidence"
+    assert "missing_artifact:p28_execution_realism_report" in report.missing_artifacts
+
+
+def test_stale_p25_artifact_blocks_shadow_model():
+    # Stale P25 shadow training result must not pass the evidence gate.
+    report = build_signal_family_edge_review(
+        SignalFamilyEdgeReviewRequest(
+            family_namespace="shadow_meta_model.xgboost_dry_candidate",
+            family_type="shadow_model_family",
+            registry_report=_registry((
+                _record("p22_validity_report", "P22",
+                    family_namespace="shadow_meta_model.xgboost_dry_candidate",
+                    details={
+                        "return_basis": "net_return_pct",
+                        "observation_count": 100,
+                        "net_ic_positive": True,
+                    }),
+                _record("p25_shadow_training_result", "P25",
+                    family_namespace="shadow_meta_model.xgboost_dry_candidate",
+                    status="stale"),  # stale, not present
+                _record("p26_shadow_portfolio_report", "P26",
+                    family_namespace="shadow_meta_model.xgboost_dry_candidate"),
+                _record("p28_execution_realism_report", "P28",
+                    family_namespace="shadow_meta_model.xgboost_dry_candidate"),
+            )),
+            policy=_policy(),
+        )
+    )
+    assert report.status == "blocked_missing_evidence"
+    assert "missing_artifact:p25_shadow_training_result" in report.missing_artifacts
+
+
+def test_invalid_p26_artifact_blocks_shadow_model():
+    # Invalid P26 portfolio report must not pass the evidence gate.
+    report = build_signal_family_edge_review(
+        SignalFamilyEdgeReviewRequest(
+            family_namespace="shadow_meta_model.xgboost_dry_candidate",
+            family_type="shadow_model_family",
+            registry_report=_registry((
+                _record("p22_validity_report", "P22",
+                    family_namespace="shadow_meta_model.xgboost_dry_candidate",
+                    details={
+                        "return_basis": "net_return_pct",
+                        "observation_count": 100,
+                        "net_ic_positive": True,
+                    }),
+                _record("p25_shadow_training_result", "P25",
+                    family_namespace="shadow_meta_model.xgboost_dry_candidate"),
+                _record("p26_shadow_portfolio_report", "P26",
+                    family_namespace="shadow_meta_model.xgboost_dry_candidate",
+                    status="invalid"),  # invalid, not present
+                _record("p28_execution_realism_report", "P28",
+                    family_namespace="shadow_meta_model.xgboost_dry_candidate"),
+            )),
+            policy=_policy(),
+        )
+    )
+    assert report.status == "blocked_missing_evidence"
+    assert "missing_artifact:p26_shadow_portfolio_report" in report.missing_artifacts
+
+
 def test_shadow_model_promotion_forbidden_reason_present():
     report = build_signal_family_edge_review(
         SignalFamilyEdgeReviewRequest(
