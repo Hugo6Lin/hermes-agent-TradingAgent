@@ -62,6 +62,14 @@ after research has completed. It persists forward outcome rows in
 to research decisions: outcomes do not alter `final_judge`, `RoleWeightConfig`,
 P33 edge review, P35 runtime, or production configuration in P36.
 
+#### P37 Market Regime Context
+
+`market_regime_context.py` consumes market proxy histories and emits a
+standalone market-regime snapshot. The flow is one-way: market context is
+persisted and written to artifacts, but it does not alter `final_judge`,
+`RoleWeightConfig`, `JudgeInputPacket`, P35 governance runtime, P36 outcome
+tracking, or production configuration in P37.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 

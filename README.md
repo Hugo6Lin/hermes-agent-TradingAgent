@@ -417,6 +417,32 @@ Invalid JSON or structurally invalid config returns `blocked_invalid_config`.
 Write failures return `governance_degraded`. Requests with
 `allow_actual_execution=true` remain blocked by P32-B dry-run rules.
 
+### P37 Market Regime Context
+
+Core module:
+
+```text
+agent/research_v1/market_regime_context.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli market-regime-run \
+  --as-of-date 2026-04-30 \
+  --lookback-days 90 \
+  --output-root output/governance
+```
+
+P37 adds standalone daily market-regime context. It computes index trend,
+volatility, breadth, risk appetite, and sector rotation from market proxy
+histories, persists append-only `market_regime_snapshots`, and writes
+`p37_market_regime_snapshot.{json,md}` under `output/governance/YYYY-MM-DD/`.
+
+P37 is context evidence only. It does not change ticker recommendations,
+call `final_judge`, train models, schedule jobs, send notifications, place
+trades, or approve production adoption.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -478,6 +504,14 @@ Use Python 3.11:
   -q
 ```
 
+### P37 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_market_regime_context.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -509,7 +543,7 @@ Recent result:
 60 passed
 ```
 
-### Full P20-P36 Governance Chain
+### Full P20-P37 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -543,6 +577,7 @@ Recent result:
   tests/agent/research_v1/test_boss_governance_brief.py \
   tests/agent/research_v1/test_governance_runtime.py \
   tests/agent/research_v1/test_recommendation_outcomes.py \
+  tests/agent/research_v1/test_market_regime_context.py \
   -q
 ```
 
