@@ -33,6 +33,8 @@ This branch has moved beyond the old P20 starting point. It now includes:
 - P34 boss governance daily brief
 - P35 local governance runtime, CLI entrypoint, and documentation standards closure
 - P36 recommendation outcome tracking
+- P37 market regime context
+- P38 fundamental quality engine
 
 ## What Hermes Answers
 
@@ -443,6 +445,34 @@ P37 is context evidence only. It does not change ticker recommendations,
 call `final_judge`, train models, schedule jobs, send notifications, place
 trades, or approve production adoption.
 
+### P38 Fundamental Quality Engine
+
+Core module:
+
+```text
+agent/research_v1/fundamental_quality.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli fundamental-quality-run \
+  --input /path/to/fundamentals.json \
+  --as-of-date 2026-04-30 \
+  --output-root output/governance
+```
+
+P38 adds standalone deterministic fundamental-quality scoring from
+point-in-time financial rows. It computes profitability, growth quality,
+cash conversion, balance-sheet strength, dilution, and stability dimensions,
+persists append-only `fundamental_quality_reports`, and writes
+`p38_fundamental_quality.{json,md}` under `output/governance/YYYY-MM-DD/`.
+
+P38 is evidence only. It does not change ticker recommendations, call
+`final_judge`, alter `RoleWeightConfig`, inject into `JudgeInputPacket`,
+train models, schedule jobs, send notifications, place trades, or approve
+production adoption.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -512,6 +542,14 @@ Use Python 3.11:
   -q
 ```
 
+### P38 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_fundamental_quality.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -543,7 +581,7 @@ Recent result:
 60 passed
 ```
 
-### Full P20-P37 Governance Chain
+### Full P20-P38 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -578,6 +616,7 @@ Recent result:
   tests/agent/research_v1/test_governance_runtime.py \
   tests/agent/research_v1/test_recommendation_outcomes.py \
   tests/agent/research_v1/test_market_regime_context.py \
+  tests/agent/research_v1/test_fundamental_quality.py \
   -q
 ```
 

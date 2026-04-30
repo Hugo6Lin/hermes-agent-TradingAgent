@@ -70,6 +70,15 @@ persisted and written to artifacts, but it does not alter `final_judge`,
 `RoleWeightConfig`, `JudgeInputPacket`, P35 governance runtime, P36 outcome
 tracking, or production configuration in P37.
 
+#### P38 Fundamental Quality Engine
+
+`fundamental_quality.py` consumes point-in-time financial rows and emits
+standalone fundamental-quality reports. The flow is one-way: quality reports
+are persisted and written to artifacts, but P38 does not alter
+`_extract_thesis_inputs()`, `ThesisEngine`, `final_judge`, `RoleWeightConfig`,
+`JudgeInputPacket`, P35 governance runtime, P36 outcome tracking, P37
+market-regime context, or production configuration.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 
