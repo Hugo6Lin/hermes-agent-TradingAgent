@@ -109,6 +109,10 @@ not call `HermesResearchApp.run()`, `final_judge`, P36-P41 runtime commands,
 or broker/order APIs. Missing upstream evidence is surfaced as limited
 context rather than hidden.
 
+#### P43 Read-Only Co-Pilot Console Index
+
+`copilot_console_index.py` scans existing files under `output/governance/YYYY-MM-DD/` and writes a static index for navigation. The flow is one-way: P43 does not invoke P36-P42 runtimes, `HermesResearchApp.run()`, `final_judge`, or broker/order APIs.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 

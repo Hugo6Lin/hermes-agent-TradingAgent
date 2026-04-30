@@ -578,6 +578,16 @@ P42 is daily research-priority evidence only. It does not create
 recommendations, instruct trades, submit orders, schedule jobs, send
 notifications, or mutate prior evidence.
 
+### P43 Read-Only Co-Pilot Console Index
+
+P43 scans existing P36-P42 governance artifacts and writes a static local
+console index: `p43_copilot_console_index.json`, `.md`, and `.html`. It is a
+navigation layer over existing evidence, not a live dashboard or trading surface.
+
+P43 is a static read-only evidence index. It does not run research, call prior
+phase runtimes, schedule jobs, send notifications, recommend trades, or mutate
+research decisions.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -687,6 +697,14 @@ Use Python 3.11:
   -q
 ```
 
+### P43 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_copilot_console_index.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -718,7 +736,7 @@ Recent result:
 60 passed
 ```
 
-### Full P20-P42 Governance Chain
+### Full P20-P43 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -758,6 +776,7 @@ Recent result:
   tests/agent/research_v1/test_research_memory_pack.py \
   tests/agent/research_v1/test_decision_journal_guardrails.py \
   tests/agent/research_v1/test_boss_copilot_daily_brief.py \
+  tests/agent/research_v1/test_copilot_console_index.py \
   -q
 ```
 
