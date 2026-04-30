@@ -427,3 +427,60 @@ def test_market_regime_run_cli_rejects_invalid_inputs(tmp_path, capsys):
 
     assert code == 2
     assert "invalid market-regime-run input" in capsys.readouterr().out
+
+
+# ── P38 fundamental-quality-run CLI tests ────────────────────────────────────
+
+def test_fundamental_quality_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "fundamentals.json"
+    input_path.write_text('{"as_of_date":"2026-04-30","tickers":[]}', encoding="utf-8")
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "p38_fundamental_quality.json").write_text("{}", encoding="utf-8")
+        (output_dir / "p38_fundamental_quality.md").write_text("# P38", encoding="utf-8")
+        return {
+            "status": "completed",
+            "output_dir": str(output_dir),
+            "report_count": 1,
+            "blocked_count": 0,
+            "warning_count": 0,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_fundamental_quality", fake_run)
+
+    code = main([
+        "--app-root", str(app_root),
+        "fundamental-quality-run",
+        "--input", str(input_path),
+        "--as-of-date", "2026-04-30",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Fundamental quality status: completed" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_fundamental_quality_run_cli_rejects_invalid_json(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "bad.json"
+    input_path.write_text("{bad", encoding="utf-8")
+
+    code = main([
+        "--app-root", str(app_root),
+        "fundamental-quality-run",
+        "--input", str(input_path),
+        "--as-of-date", "2026-04-30",
+    ])
+
+    assert code == 2
+    assert "invalid fundamental-quality-run input" in capsys.readouterr().out

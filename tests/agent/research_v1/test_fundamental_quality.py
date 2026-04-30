@@ -223,3 +223,48 @@ def test_fundamental_quality_artifacts_are_written(tmp_path: Path):
     assert paths["json"].exists()
     assert paths["md"].exists()
     assert "P38 is fundamental-quality evidence only" in paths["md"].read_text()
+
+
+# ── P38-C run orchestration and hard-boundary tests ──────────────────────────
+
+from agent.research_v1.fundamental_quality import run_fundamental_quality
+
+
+def test_run_fundamental_quality_persists_and_writes_artifacts(tmp_path: Path):
+    db = _db(tmp_path)
+    input_payload = {
+        "as_of_date": "2026-04-30",
+        "source": "fixture",
+        "tickers": [{"ticker": "AAPL", "sector": "technology", "currency": "USD", "rows": _rows()}],
+    }
+
+    result = run_fundamental_quality(
+        db=db,
+        input_payload=input_payload,
+        as_of_date="2026-04-30",
+        output_root=tmp_path / "output" / "governance",
+    )
+
+    assert result["status"] == "completed"
+    assert result["report_count"] == 1
+    assert (Path(result["output_dir"]) / "p38_fundamental_quality.json").exists()
+
+
+def test_p38_hard_boundaries_are_explicit():
+    from agent.research_v1 import fundamental_quality as p38
+
+    forbidden_names = {
+        "broker",
+        "order",
+        "train_model",
+        "scheduler",
+        "notification",
+        "final_judge",
+        "run_governance_runtime",
+        "run_recommendation_outcome_tracking",
+        "run_market_regime_context",
+        "_extract_thesis_inputs",
+    }
+
+    assert not (forbidden_names & set(p38.__dict__))
+    assert "does not approve production" in p38.P38_ARTIFACT_DISCLAIMER
