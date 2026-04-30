@@ -28,17 +28,10 @@ from agent.research_v1.contracts import (
 )
 
 
-# Weights for role-based score aggregation
-ROLE_WEIGHTS = {
-    "fundamentals": 0.40,
-    "technical": 0.25,
-    "news": 0.15,
-    "sentiment": 0.10,
-    "industry": 0.05,
-    "options": 0.05,
-    "risk": 0.00,  # risk informs warnings, not direction
-    "valuation": 0.00,
-}
+from agent.research_v1.calibration_config import RoleWeightConfig
+
+# Weights for role-based score aggregation (via config for zero-weight guards)
+ROLE_WEIGHTS = RoleWeightConfig().as_plain_weights()
 
 
 class FinalJudge:
@@ -49,9 +42,15 @@ class FinalJudge:
     Does NOT read arbitrary upstream state.
     """
 
-    def __init__(self):
-        """Initialize the final judge."""
-        pass
+    def __init__(self, role_weight_config: RoleWeightConfig | None = None):
+        """Initialize the final judge.
+
+        Args:
+            role_weight_config: Optional injected role weight config.
+                Defaults to module-level ROLE_WEIGHTS if not provided.
+        """
+        self.role_weight_config = role_weight_config or RoleWeightConfig()
+        self.role_weights = self.role_weight_config.as_plain_weights()
 
     def make_judgment(self, packet: JudgeInputPacket) -> tuple[CanonicalSignal, CanonicalReport]:
         """
@@ -146,7 +145,7 @@ class FinalJudge:
         total_weight = 0.0
         weighted_sum = 0.0
         for role, score in role_scores.items():
-            weight = ROLE_WEIGHTS.get(role, 0.05)
+            weight = self.role_weights.get(role, 0.05)
             weighted_sum += (score * 0.5 + 0.5) * weight  # shift [-1,1] -> [0,1]
             total_weight += weight
 

@@ -9,6 +9,7 @@ from typing import Sequence
 
 from agent.research_v1.data.database import ResearchDatabase
 from agent.research_v1.data.futu_opend import FutuQuoteClient
+from agent.research_v1.governance_runtime import GovernanceRuntimeRequest, run_governance_runtime
 from agent.research_v1.paths import HermesPaths
 from agent.research_v1.report_pdf_legacy import export_batch_pdf
 from agent.research_v1.research_batch_service import save_batch_research
@@ -87,6 +88,35 @@ def _cmd_option_chain(symbol: str, start: str | None, end: str | None) -> int:
     return 0
 
 
+def _cmd_governance_run(
+    paths: HermesPaths,
+    config_path: str,
+    run_date: str,
+    output_root: str,
+    freshness_policy_days: int,
+) -> int:
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    result = run_governance_runtime(
+        GovernanceRuntimeRequest(
+            run_date=run_date,
+            repo_root=paths.app_root,
+            output_root=output_path.resolve(),
+            config_path=Path(config_path).expanduser().resolve(),
+            freshness_policy_days=freshness_policy_days,
+        )
+    )
+    print(f"Governance runtime status: {result.status}")
+    print(f"Output dir: {result.output_dir}")
+    print(f"Boss brief status: {result.boss_brief_status}")
+    for artifact in result.artifacts_written:
+        print(f"Artifact: {artifact}")
+    for warning in result.warnings:
+        print(f"Warning: {warning}")
+    return 2 if result.status == "blocked_invalid_config" else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -117,6 +147,21 @@ def build_parser() -> argparse.ArgumentParser:
     option_parser.add_argument("--start", default=None, help="Start expiration date YYYY-MM-DD.")
     option_parser.add_argument("--end", default=None, help="End expiration date YYYY-MM-DD.")
 
+    governance_parser = subparsers.add_parser("governance-run", help="Run the local governance evidence loop.")
+    governance_parser.add_argument("--config", required=True, help="Path to governance runtime JSON config.")
+    governance_parser.add_argument("--run-date", required=True, help="Governance run date YYYY-MM-DD.")
+    governance_parser.add_argument(
+        "--output-root",
+        default="output/governance",
+        help="Root directory for governance artifacts.",
+    )
+    governance_parser.add_argument(
+        "--freshness-policy-days",
+        default=7,
+        type=int,
+        help="Maximum artifact age before registry marks an artifact stale.",
+    )
+
     return parser
 
 
@@ -139,6 +184,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_quote(args.symbols)
     if args.command == "option-chain":
         return _cmd_option_chain(args.symbol, args.start, args.end)
+    if args.command == "governance-run":
+        return _cmd_governance_run(
+            paths,
+            config_path=args.config,
+            run_date=args.run_date,
+            output_root=args.output_root,
+            freshness_policy_days=args.freshness_policy_days,
+        )
 
     parser.print_help()
     return 1

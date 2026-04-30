@@ -20,8 +20,21 @@ STRESS_SCENARIOS = {
 def evaluate_stress_scenarios(
     scenario_results: dict[str, dict],
     max_drawdown_limit: float = -0.25,
+    resimulation_enabled: bool = False,
+    boss_facing_enabled: bool = False,
 ) -> dict:
-    """Evaluate regime-specific outcomes against a drawdown threshold."""
+    """Evaluate regime-specific outcomes against a drawdown threshold.
+
+    Args:
+        scenario_results: Dict of scenario name -> metrics dict.
+        max_drawdown_limit: Threshold below which a warning is generated.
+        resimulation_enabled: Whether real regime-window resimulation is available.
+        boss_facing_enabled: Whether results should be shown to end users.
+
+    Returns:
+        Dict with scenario_count, has_critical_regime, warnings, resimulation_status,
+        and boss_facing_enabled fields.
+    """
     warnings = []
     for scenario_name, metrics in scenario_results.items():
         max_drawdown = metrics.get("max_drawdown", 0.0)
@@ -38,4 +51,6 @@ def evaluate_stress_scenarios(
         "scenario_count": len(scenario_results),
         "has_critical_regime": len(warnings) > 0,
         "warnings": warnings,
+        "resimulation_status": "enabled" if resimulation_enabled else "disabled",
+        "boss_facing_enabled": bool(boss_facing_enabled and resimulation_enabled),
     }
