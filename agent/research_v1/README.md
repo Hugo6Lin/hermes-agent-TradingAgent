@@ -101,6 +101,14 @@ The flow is one-way: decision journal entries do not call
 `HermesResearchApp.run()`, `final_judge`, `JudgeInputPacket`, or
 broker/order APIs.
 
+#### P42 Boss Co-Pilot Daily Brief
+
+`boss_copilot_daily_brief.py` reads persisted P36-P41 evidence and emits a
+daily research-priority brief for the boss. The flow is one-way: P42 does
+not call `HermesResearchApp.run()`, `final_judge`, P36-P41 runtime commands,
+or broker/order APIs. Missing upstream evidence is surfaced as limited
+context rather than hidden.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 

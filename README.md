@@ -553,6 +553,31 @@ P41 is behavioral guardrail evidence only. It does not block action,
 call `HermesResearchApp.run()`, `final_judge`, place orders, or alter
 recommendations.
 
+### P42 Boss Co-Pilot Daily Brief
+
+```
+agent/research_v1/boss_copilot_daily_brief.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli boss-copilot-brief-run \
+  --as-of-date 2026-04-30 \
+  --output-root output/governance \
+  --max-priorities 8
+```
+
+P42 aggregates existing P36-P41 evidence into a daily boss-facing
+research-priority brief. It reads recommendation outcomes, market regime,
+fundamental quality, candidate pools, research memory, and decision-journal
+guardrails, then writes `p42_boss_copilot_daily_brief.{json,md}` under
+`output/governance/YYYY-MM-DD/`.
+
+P42 is daily research-priority evidence only. It does not create
+recommendations, instruct trades, submit orders, schedule jobs, send
+notifications, or mutate prior evidence.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -654,6 +679,14 @@ Use Python 3.11:
   -q
 ```
 
+### P42 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_boss_copilot_daily_brief.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -685,7 +718,7 @@ Recent result:
 60 passed
 ```
 
-### Full P20-P41 Governance Chain
+### Full P20-P42 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -724,6 +757,7 @@ Recent result:
   tests/agent/research_v1/test_candidate_pool.py \
   tests/agent/research_v1/test_research_memory_pack.py \
   tests/agent/research_v1/test_decision_journal_guardrails.py \
+  tests/agent/research_v1/test_boss_copilot_daily_brief.py \
   -q
 ```
 
