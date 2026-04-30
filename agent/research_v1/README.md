@@ -38,6 +38,20 @@ The old HTML/CSS/PDF-first report direction is no longer the main Phase 19 archi
 
 Hermes is now entering **P20: factor calibration and model routing**.
 
+## Data Flow
+
+Hermes now has two connected flows.
+
+The research flow starts with a natural-language research request, routes it
+through task decomposition, market-data collection, analyst evidence, final
+judgment, canonical signal/report objects, and optional image-report generation.
+
+The governance flow starts from P20-P30 evidence, then runs P31 readiness,
+P32 artifact registry and dry-run generation validation, P33 signal-family edge
+review, P34 boss governance brief, and P35 local runtime orchestration. This
+flow writes append-only governance artifacts under `output/governance/YYYY-MM-DD/`
+and does not create broker orders or production approval.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 
