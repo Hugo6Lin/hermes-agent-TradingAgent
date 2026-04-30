@@ -160,3 +160,67 @@ def test_run_prompt_pack_blocks_when_p47_missing(tmp_path: Path):
     result = run_research_context_prompt_pack(db, governance_root, tmp_path / "out", "2026-05-01", ["AAPL"], ["risk"], 1200)
     assert result["status"] == "blocked_missing_context"
     assert not (tmp_path / "out" / "2026-05-01" / "p48_research_context_prompt_pack.json").exists()
+
+
+def test_source_pack_selection_prefers_matching_tickers(tmp_path: Path):
+    """P48 for AAPL should pick the AAPL pack even if a newer MSFT pack exists."""
+    db = ResearchDatabase(str(tmp_path / "test.db"))
+    db.initialize()
+    msft_pack = {
+        "pack_id": "p47-2026-05-01-msft",
+        "as_of_date": "2026-05-01",
+        "created_at": "2026-05-01T12:00:00+00:00",
+        "status": "context_pack_ready",
+        "source_hash": "msft-hash",
+        "tickers": ["MSFT"],
+        "system_context": {},
+        "ticker_contexts": [{"ticker": "MSFT", "context_status": "context_ready", "market_regime": {"regime_label": "bullish"}}],
+        "source_refs": [],
+        "missing_context": [],
+        "warnings": [],
+    }
+    aapl_pack = {
+        "pack_id": "p47-2026-05-01-aapl",
+        "as_of_date": "2026-05-01",
+        "created_at": "2026-05-01T10:00:00+00:00",
+        "status": "context_pack_ready",
+        "source_hash": "aapl-hash",
+        "tickers": ["AAPL"],
+        "system_context": {},
+        "ticker_contexts": [{"ticker": "AAPL", "context_status": "context_ready", "market_regime": {"regime_label": "neutral"}}],
+        "source_refs": [],
+        "missing_context": [],
+        "warnings": [],
+    }
+    db.save_research_context_pack(msft_pack)
+    db.save_research_context_pack(aapl_pack)
+    governance_root = tmp_path / "governance"
+    governance_root.mkdir()
+    result = run_research_context_prompt_pack(db, governance_root, tmp_path / "out", "2026-05-01", ["AAPL"], ["technical"], 1200)
+    assert result["status"] == "prompt_pack_ready"
+    assert result["source_context_pack_id"] == "p47-2026-05-01-aapl"
+
+
+def test_run_prompt_pack_limited_when_source_exists_but_ticker_missing(tmp_path: Path):
+    """P47 pack exists for AAPL but P48 requests MSFT: should be limited, not blocked."""
+    db = ResearchDatabase(str(tmp_path / "test.db"))
+    db.initialize()
+    aapl_pack = {
+        "pack_id": "p47-2026-05-01-aapl",
+        "as_of_date": "2026-05-01",
+        "created_at": "2026-05-01T10:00:00+00:00",
+        "status": "context_pack_ready",
+        "source_hash": "aapl-hash",
+        "tickers": ["AAPL"],
+        "system_context": {},
+        "ticker_contexts": [{"ticker": "AAPL", "context_status": "context_ready", "market_regime": {"regime_label": "neutral"}}],
+        "source_refs": [],
+        "missing_context": [],
+        "warnings": [],
+    }
+    db.save_research_context_pack(aapl_pack)
+    governance_root = tmp_path / "governance"
+    governance_root.mkdir()
+    result = run_research_context_prompt_pack(db, governance_root, tmp_path / "out", "2026-05-01", ["MSFT"], ["risk"], 1200)
+    assert result["status"] == "prompt_pack_limited"
+    assert all(ctx["context_status"] == "role_context_missing" for ctx in result["role_contexts"])

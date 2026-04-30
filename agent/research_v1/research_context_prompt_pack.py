@@ -197,10 +197,8 @@ def build_research_context_prompt_pack(
     warnings = sorted({item for ctx in role_contexts for item in ctx.get("warnings", [])})
     if all(ctx["context_status"] == "role_context_ready" for ctx in role_contexts):
         status = "prompt_pack_ready"
-    elif any(ctx["context_status"] != "role_context_missing" for ctx in role_contexts):
-        status = "prompt_pack_limited"
     else:
-        status = "blocked_missing_context"
+        status = "prompt_pack_limited"
     seed = {
         "schema_version": P48_SCHEMA_VERSION,
         "as_of_date": as_of_date,
@@ -284,19 +282,31 @@ def write_research_context_prompt_pack(pack: dict[str, Any], output_root: Path) 
     return [str(json_path), str(md_path)]
 
 
-def _load_p47_artifact_as_of(governance_root: Path, as_of_date: str, lookback_days: int = 30) -> dict[str, Any] | None:
+def _pack_covers_tickers(pack: dict[str, Any], requested: set[str]) -> bool:
+    pack_tickers = {str(t).upper() for t in pack.get("tickers", [])}
+    return bool(pack_tickers & requested)
+
+
+def _load_p47_artifact_as_of(governance_root: Path, as_of_date: str, tickers: set[str] | None = None, lookback_days: int = 30) -> dict[str, Any] | None:
     for offset in range(lookback_days + 1):
         day = (date.fromisoformat(as_of_date) - timedelta(days=offset)).isoformat()
         path = governance_root / day / "p47_research_context_pack.json"
         if path.exists():
             try:
-                return json.loads(path.read_text(encoding="utf-8"))
+                pack = json.loads(path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 return None
+            if tickers is None or _pack_covers_tickers(pack, tickers):
+                return pack
     return None
 
 
-def load_source_context_pack(db: Any, governance_root: Path, as_of_date: str) -> dict[str, Any] | None:
+def load_source_context_pack(db: Any, governance_root: Path, as_of_date: str, tickers: list[str] | None = None) -> tuple[dict[str, Any] | None, bool]:
+    """Return (pack, any_pack_exists). pack is None when no ticker-matching pack is found.
+    any_pack_exists is True when at least one P47 pack exists at or before as_of_date
+    (even if it doesn't cover the requested tickers)."""
+    requested = {str(t).upper() for t in tickers} if tickers else set()
+    any_exists = False
     method = getattr(db, "list_research_context_packs_as_of", None)
     if method:
         try:
@@ -304,8 +314,22 @@ def load_source_context_pack(db: Any, governance_root: Path, as_of_date: str) ->
         except Exception:
             rows = []
         if rows:
-            return rows[0]
-    return _load_p47_artifact_as_of(Path(governance_root), as_of_date)
+            any_exists = True
+        if requested:
+            for row in rows:
+                if _pack_covers_tickers(row, requested):
+                    return row, True
+        elif rows:
+            return rows[0], True
+    artifact = _load_p47_artifact_as_of(Path(governance_root), as_of_date, requested or None)
+    if artifact:
+        return artifact, True
+    # Check if any artifact exists without ticker filter
+    if requested:
+        any_artifact = _load_p47_artifact_as_of(Path(governance_root), as_of_date, None)
+        if any_artifact:
+            return None, True
+    return None, any_exists
 
 
 def run_research_context_prompt_pack(
@@ -327,8 +351,8 @@ def run_research_context_prompt_pack(
     )
     if validation["status"] == "blocked_invalid_input":
         return validation
-    source_pack = load_source_context_pack(db, governance_root, as_of_date)
-    if not source_pack:
+    source_pack, any_pack_exists = load_source_context_pack(db, governance_root, as_of_date, validation["tickers"])
+    if not source_pack and not any_pack_exists:
         return {
             "schema_version": P48_SCHEMA_VERSION,
             "status": "blocked_missing_context",
@@ -337,13 +361,34 @@ def run_research_context_prompt_pack(
             "roles": validation["roles"],
             "warnings": ["missing_p47_research_context_pack"],
         }
-    pack = build_research_context_prompt_pack(
-        as_of_date=as_of_date,
-        tickers=validation["tickers"],
-        roles=validation["roles"],
-        max_block_chars=max_block_chars,
-        source_pack=source_pack,
-    )
+    if not source_pack:
+        # P47 packs exist but none cover the requested tickers
+        empty_source = {
+            "pack_id": "",
+            "as_of_date": as_of_date,
+            "source_hash": "",
+            "tickers": validation["tickers"],
+            "system_context": {},
+            "ticker_contexts": [],
+            "source_refs": [],
+            "missing_context": [],
+            "warnings": [],
+        }
+        pack = build_research_context_prompt_pack(
+            as_of_date=as_of_date,
+            tickers=validation["tickers"],
+            roles=validation["roles"],
+            max_block_chars=max_block_chars,
+            source_pack=empty_source,
+        )
+    else:
+        pack = build_research_context_prompt_pack(
+            as_of_date=as_of_date,
+            tickers=validation["tickers"],
+            roles=validation["roles"],
+            max_block_chars=max_block_chars,
+            source_pack=source_pack,
+        )
     artifacts = write_research_context_prompt_pack(pack, Path(output_root))
     if hasattr(db, "save_research_context_prompt_pack"):
         db.save_research_context_prompt_pack(pack)
