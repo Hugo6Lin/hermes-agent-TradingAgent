@@ -1675,3 +1675,239 @@ class ResearchDatabase:
             return _get(conn, snapshot_id)
         finally:
             conn.close()
+
+    # ── P36 Canonical Recommendation Outcomes ──────────────────────────────────
+
+    def initialize_canonical_outcome_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS canonical_recommendation_outcomes (
+                    canonical_outcome_id TEXT PRIMARY KEY,
+                    schema_version TEXT NOT NULL,
+                    signal_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    ticker TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    rating TEXT NOT NULL,
+                    horizon_days INTEGER NOT NULL,
+                    calendar TEXT NOT NULL,
+                    entry_rule TEXT NOT NULL,
+                    entry_price REAL,
+                    entry_date TEXT,
+                    exit_price REAL,
+                    exit_date TEXT,
+                    target_reached INTEGER NOT NULL DEFAULT 0,
+                    stop_breached INTEGER NOT NULL DEFAULT 0,
+                    target_reached_before_stop INTEGER NOT NULL DEFAULT 0,
+                    benchmark_return_pct REAL,
+                    gross_return_pct REAL,
+                    net_return_pct REAL,
+                    max_drawdown_pct REAL,
+                    win INTEGER NOT NULL DEFAULT 0,
+                    win_definition TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    evaluation_proxy TEXT NOT NULL DEFAULT 'none',
+                    cost_basis TEXT NOT NULL DEFAULT 'none',
+                    cost_bps REAL NOT NULL DEFAULT 0.0,
+                    data_source TEXT NOT NULL,
+                    price_adjustment TEXT NOT NULL DEFAULT 'unknown',
+                    data_source_hash TEXT NOT NULL,
+                    path_precision TEXT NOT NULL DEFAULT 'close_only',
+                    evaluated_for_date TEXT NOT NULL,
+                    evaluated_at TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(signal_id, horizon_days, evaluated_for_date, data_source_hash),
+                    FOREIGN KEY (signal_id) REFERENCES canonical_signals(signal_id)
+                )
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_canonical_outcome(self, outcome: dict) -> str:
+        parts = [
+            outcome["signal_id"],
+            str(outcome["horizon_days"]),
+            outcome["evaluated_for_date"],
+            outcome["data_source_hash"],
+        ]
+        outcome_id = "outcome_" + "_".join(parts)
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT OR IGNORE INTO canonical_recommendation_outcomes (
+                    canonical_outcome_id, schema_version, signal_id, task_id, ticker,
+                    action, rating, horizon_days, calendar, entry_rule,
+                    entry_price, entry_date, exit_price, exit_date,
+                    target_reached, stop_breached, target_reached_before_stop,
+                    benchmark_return_pct, gross_return_pct, net_return_pct, max_drawdown_pct,
+                    win, win_definition, status, evaluation_proxy,
+                    cost_basis, cost_bps, data_source, price_adjustment,
+                    data_source_hash, path_precision, evaluated_for_date, evaluated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?
+                )""",
+                (
+                    outcome_id,
+                    outcome["schema_version"],
+                    outcome["signal_id"],
+                    outcome["task_id"],
+                    outcome["ticker"],
+                    outcome["action"],
+                    outcome["rating"],
+                    outcome["horizon_days"],
+                    outcome["calendar"],
+                    outcome["entry_rule"],
+                    outcome.get("entry_price"),
+                    outcome.get("entry_date"),
+                    outcome.get("exit_price"),
+                    outcome.get("exit_date"),
+                    int(outcome.get("target_reached", False)),
+                    int(outcome.get("stop_breached", False)),
+                    int(outcome.get("target_reached_before_stop", False)),
+                    outcome.get("benchmark_return_pct"),
+                    outcome.get("gross_return_pct"),
+                    outcome.get("net_return_pct"),
+                    outcome.get("max_drawdown_pct"),
+                    int(outcome.get("win", False)),
+                    outcome.get("win_definition", ""),
+                    outcome["status"],
+                    outcome.get("evaluation_proxy", "none"),
+                    outcome.get("cost_basis", "none"),
+                    outcome.get("cost_bps", 0.0),
+                    outcome.get("data_source", ""),
+                    outcome.get("price_adjustment", "unknown"),
+                    outcome["data_source_hash"],
+                    outcome.get("path_precision", "close_only"),
+                    outcome["evaluated_for_date"],
+                    outcome["evaluated_at"],
+                ),
+            )
+            conn.commit()
+            return outcome_id
+        finally:
+            conn.close()
+
+    def list_canonical_outcomes_by_signal(self, signal_id: str) -> list[dict]:
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM canonical_recommendation_outcomes WHERE signal_id = ? ORDER BY horizon_days",
+                (signal_id,),
+            )
+            rows = cursor.fetchall()
+            return [self._outcome_row_to_dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_recent_outcome_track_record(self, ticker: str, lookback_days: int = 90) -> list[dict]:
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM canonical_recommendation_outcomes
+                   WHERE ticker = ? AND evaluated_for_date >= date('now', ?)
+                   ORDER BY evaluated_for_date DESC, horizon_days""",
+                (ticker, f"-{lookback_days} days"),
+            )
+            rows = cursor.fetchall()
+            return [self._outcome_row_to_dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def summarize_outcomes_by(self, group_by: str, horizon_days: int | None = None) -> list[dict]:
+        group_column_map = {
+            "action": "action",
+            "rating": "rating",
+            "ticker": "ticker",
+            "horizon": "horizon_days",
+        }
+        if group_by not in group_column_map:
+            raise ValueError(f"unsupported group_by: {group_by}")
+        col = group_column_map[group_by]
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            where = ""
+            params: list = []
+            if horizon_days is not None:
+                where = "WHERE horizon_days = ?"
+                params.append(horizon_days)
+            cursor.execute(
+                f"""SELECT {col} as grp, COUNT(*) as sample_size,
+                    AVG(CASE WHEN win = 1 THEN 1.0 ELSE 0.0 END) as hit_rate,
+                    AVG(net_return_pct) as mean_net_return,
+                    AVG(CASE WHEN win = 1 THEN net_return_pct END) as mean_win,
+                    AVG(CASE WHEN win = 0 THEN net_return_pct END) as mean_loss,
+                    AVG(max_drawdown_pct) as average_drawdown
+                    FROM canonical_recommendation_outcomes
+                    {where}
+                    GROUP BY {col}
+                    ORDER BY sample_size DESC""",
+                params,
+            )
+            rows = cursor.fetchall()
+            return [
+                {
+                    "group": row["grp"],
+                    "sample_size": row["sample_size"],
+                    "hit_rate": row["hit_rate"],
+                    "mean_net_return": row["mean_net_return"],
+                    "mean_win": row["mean_win"],
+                    "mean_loss": row["mean_loss"],
+                    "average_drawdown": row["average_drawdown"],
+                }
+                for row in rows
+            ]
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _outcome_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "canonical_outcome_id": row["canonical_outcome_id"],
+            "schema_version": row["schema_version"],
+            "signal_id": row["signal_id"],
+            "task_id": row["task_id"],
+            "ticker": row["ticker"],
+            "action": row["action"],
+            "rating": row["rating"],
+            "horizon_days": row["horizon_days"],
+            "calendar": row["calendar"],
+            "entry_rule": row["entry_rule"],
+            "entry_price": row["entry_price"],
+            "entry_date": row["entry_date"],
+            "exit_price": row["exit_price"],
+            "exit_date": row["exit_date"],
+            "target_reached": bool(row["target_reached"]),
+            "stop_breached": bool(row["stop_breached"]),
+            "target_reached_before_stop": bool(row["target_reached_before_stop"]),
+            "benchmark_return_pct": row["benchmark_return_pct"],
+            "gross_return_pct": row["gross_return_pct"],
+            "net_return_pct": row["net_return_pct"],
+            "max_drawdown_pct": row["max_drawdown_pct"],
+            "win": bool(row["win"]),
+            "win_definition": row["win_definition"],
+            "status": row["status"],
+            "evaluation_proxy": row["evaluation_proxy"],
+            "cost_basis": row["cost_basis"],
+            "cost_bps": row["cost_bps"],
+            "data_source": row["data_source"],
+            "price_adjustment": row["price_adjustment"],
+            "data_source_hash": row["data_source_hash"],
+            "path_precision": row["path_precision"],
+            "evaluated_for_date": row["evaluated_for_date"],
+            "evaluated_at": row["evaluated_at"],
+            "created_at": row["created_at"],
+        }
