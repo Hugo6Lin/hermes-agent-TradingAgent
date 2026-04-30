@@ -113,6 +113,10 @@ context rather than hidden.
 
 `copilot_console_index.py` scans existing files under `output/governance/YYYY-MM-DD/` and writes a static index for navigation. The flow is one-way: P43 does not invoke P36-P42 runtimes, `HermesResearchApp.run()`, `final_judge`, or broker/order APIs.
 
+#### P44 Evidence Freshness & Drift Monitor
+
+`evidence_freshness_drift_monitor.py` reads persisted P36-P43 evidence and governance artifacts, then emits a deterministic evidence-health report. The flow is one-way: P44 does not invoke P36-P43 runtimes, `HermesResearchApp.run()`, `final_judge`, or broker/order APIs.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 

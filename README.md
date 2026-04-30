@@ -588,6 +588,17 @@ P43 is a static read-only evidence index. It does not run research, call prior
 phase runtimes, schedule jobs, send notifications, recommend trades, or mutate
 research decisions.
 
+### P44 Evidence Freshness & Drift Monitor
+
+P44 monitors existing P36-P43 evidence for freshness, coverage, source-hash
+churn, invalid artifacts, and repeated missing-context patterns. It writes
+`p44_evidence_freshness_drift_monitor.json` and `.md` under
+`output/governance/YYYY-MM-DD/`.
+
+P44 is evidence monitoring only. It does not refresh evidence, schedule jobs,
+send notifications, run prior phases, recommend trades, or mutate research
+decisions.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -705,6 +716,14 @@ Use Python 3.11:
   -q
 ```
 
+### P44 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_evidence_freshness_drift_monitor.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -736,7 +755,7 @@ Recent result:
 60 passed
 ```
 
-### Full P20-P43 Governance Chain
+### Full P20-P44 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -777,6 +796,7 @@ Recent result:
   tests/agent/research_v1/test_decision_journal_guardrails.py \
   tests/agent/research_v1/test_boss_copilot_daily_brief.py \
   tests/agent/research_v1/test_copilot_console_index.py \
+  tests/agent/research_v1/test_evidence_freshness_drift_monitor.py \
   -q
 ```
 
