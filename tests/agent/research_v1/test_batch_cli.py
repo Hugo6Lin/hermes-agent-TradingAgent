@@ -698,3 +698,60 @@ def test_memory_pack_run_cli_rejects_negative_lookback(tmp_path, capsys):
 
     assert code == 2
     assert "lookback-days must be positive" in capsys.readouterr().out
+
+
+# ── P41 decision-journal-run CLI tests ───────────────────────────────────
+
+def test_decision_journal_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    input_path = tmp_path / "journal.json"
+    input_path.write_text(
+        '{"as_of_date":"2026-04-30","source":"fixture","decisions":[{"ticker":"AAPL","contemplated_action":"research_candidate","decision_intent":"review_before_action","stated_reason":"fixture","boss_confidence":0.8,"urgency":"high"}]}',
+        encoding="utf-8",
+    )
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {"status": "completed", "output_dir": str(output_dir), "entry_count": 1, "manual_review_count": 0, "slow_down_count": 1, "warning_count": 0}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_decision_journal_guardrails", fake_run)
+    code = main(["--app-root", str(app_root), "decision-journal-run", "--input", str(input_path), "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Decision journal status: completed" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_decision_journal_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    input_path = tmp_path / "journal.json"
+    input_path.write_text('{"decisions":[]}', encoding="utf-8")
+    code = main(["--app-root", str(tmp_path), "decision-journal-run", "--input", str(input_path), "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid date format" in capsys.readouterr().out
+
+
+def test_decision_journal_run_cli_rejects_empty_decisions(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    input_path = tmp_path / "journal.json"
+    input_path.write_text('{"as_of_date":"2026-04-30","decisions":[]}', encoding="utf-8")
+    code = main(["--app-root", str(tmp_path), "decision-journal-run", "--input", str(input_path)])
+
+    assert code == 2
+    assert "missing or empty" in capsys.readouterr().out
+
+
+def test_decision_journal_run_cli_rejects_missing_file(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "decision-journal-run", "--input", "/nonexistent/journal.json"])
+
+    assert code == 2
+    assert "file not found" in capsys.readouterr().out
