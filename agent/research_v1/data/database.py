@@ -1999,3 +1999,111 @@ class ResearchDatabase:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    # ── P38 Fundamental Quality Reports ──────────────────────────────────────
+
+    def initialize_fundamental_quality_schema(self) -> None:
+        """Create fundamental_quality_reports table."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fundamental_quality_reports (
+                report_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                sector TEXT,
+                currency TEXT,
+                status TEXT NOT NULL,
+                quality_label TEXT NOT NULL,
+                overall_quality_score REAL,
+                confidence REAL NOT NULL,
+                coverage_ratio REAL NOT NULL,
+                usable_row_count INTEGER NOT NULL,
+                ignored_future_row_count INTEGER NOT NULL,
+                dimension_scores_json TEXT NOT NULL,
+                latest_metrics_json TEXT NOT NULL,
+                trend_metrics_json TEXT NOT NULL,
+                red_flags_json TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                UNIQUE(ticker, as_of_date, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_fundamental_quality_report(self, report: dict) -> str:
+        """Persist a fundamental-quality report. Idempotent by (ticker, as_of_date, source_hash)."""
+        import hashlib as _hashlib
+        natural_key = f"{report['ticker']}|{report['as_of_date']}|{report['source_hash']}"
+        report_id = _hashlib.sha256(natural_key.encode("utf-8")).hexdigest()[:16]
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO fundamental_quality_reports (
+                report_id, schema_version, as_of_date, created_at,
+                ticker, sector, currency,
+                status, quality_label, overall_quality_score,
+                confidence, coverage_ratio, usable_row_count, ignored_future_row_count,
+                dimension_scores_json, latest_metrics_json, trend_metrics_json,
+                red_flags_json, warnings_json, source_hash, summary
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                report_id,
+                report["schema_version"],
+                report["as_of_date"],
+                report["created_at"],
+                report["ticker"],
+                report.get("sector"),
+                report.get("currency"),
+                report["status"],
+                report["quality_label"],
+                report.get("overall_quality_score"),
+                report["confidence"],
+                report["coverage_ratio"],
+                report["usable_row_count"],
+                report["ignored_future_row_count"],
+                json.dumps(report.get("dimension_scores", {})),
+                json.dumps(report.get("latest_metrics", {})),
+                json.dumps(report.get("trend_metrics", {})),
+                json.dumps(report.get("red_flags", [])),
+                json.dumps(report.get("warnings", [])),
+                report["source_hash"],
+                report.get("summary", ""),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return report_id
+
+    def list_fundamental_quality_reports(
+        self,
+        ticker: str | None = None,
+        as_of_date: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """List persisted fundamental-quality reports."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        conditions: list[str] = []
+        params: list[Any] = []
+        if ticker:
+            conditions.append("ticker = ?")
+            params.append(ticker)
+        if as_of_date:
+            conditions.append("as_of_date = ?")
+            params.append(as_of_date)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+        cursor.execute(
+            f"SELECT * FROM fundamental_quality_reports {where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]

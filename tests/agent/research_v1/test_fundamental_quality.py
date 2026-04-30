@@ -156,3 +156,70 @@ def test_source_hash_changes_on_middle_row_revision():
     revised["rows"][2]["revenue"] = 777.0
 
     assert compute_source_hash(base, "2026-04-30") != compute_source_hash(revised, "2026-04-30")
+
+
+# ── P38-B persistence and artifact tests ─────────────────────────────────────
+
+from agent.research_v1.data.database import ResearchDatabase
+from agent.research_v1.fundamental_quality import write_fundamental_quality_artifacts
+
+
+def _db(tmp_path: Path) -> ResearchDatabase:
+    db = ResearchDatabase(str(tmp_path / "research.db"))
+    db.initialize()
+    db.initialize_fundamental_quality_schema()
+    return db
+
+
+def test_fundamental_quality_persistence_is_idempotent(tmp_path: Path):
+    db = _db(tmp_path)
+    report = build_fundamental_quality_report({
+        "ticker": "AAPL",
+        "sector": "technology",
+        "currency": "USD",
+        "rows": _rows(),
+    }, as_of_date="2026-04-30")
+
+    first = db.save_fundamental_quality_report(report)
+    second = db.save_fundamental_quality_report(report)
+    rows = db.list_fundamental_quality_reports(ticker="AAPL", as_of_date="2026-04-30")
+
+    assert first == second
+    assert len(rows) == 1
+
+
+def test_revised_fundamental_source_hash_appends(tmp_path: Path):
+    db = _db(tmp_path)
+    first_report = build_fundamental_quality_report({"ticker": "AAPL", "sector": "technology", "currency": "USD", "rows": _rows()}, "2026-04-30")
+    revised_rows = _rows()
+    revised_rows[2]["revenue"] = 777.0
+    second_report = build_fundamental_quality_report({"ticker": "AAPL", "sector": "technology", "currency": "USD", "rows": revised_rows}, "2026-04-30")
+
+    first = db.save_fundamental_quality_report(first_report)
+    second = db.save_fundamental_quality_report(second_report)
+    rows = db.list_fundamental_quality_reports(ticker="AAPL", as_of_date="2026-04-30")
+
+    assert first != second
+    assert len(rows) == 2
+
+
+def test_fundamental_quality_artifacts_are_written(tmp_path: Path):
+    report = build_fundamental_quality_report({"ticker": "AAPL", "sector": "technology", "currency": "USD", "rows": _rows()}, "2026-04-30")
+    payload = {
+        "schema_version": P38_SCHEMA_VERSION,
+        "as_of_date": "2026-04-30",
+        "created_at": report["created_at"],
+        "status": "completed",
+        "reports": [report],
+        "summary": {"report_count": 1, "blocked_count": 0},
+        "warnings": [],
+        "disclaimer": "P38 is fundamental-quality evidence only. It does not approve production adoption, change recommendations, instruct trades, place orders, train models, schedule jobs, or mutate production configuration.",
+    }
+
+    paths = write_fundamental_quality_artifacts(payload, tmp_path / "output" / "governance" / "2026-04-30")
+
+    assert paths["json"].name == "p38_fundamental_quality.json"
+    assert paths["md"].name == "p38_fundamental_quality.md"
+    assert paths["json"].exists()
+    assert paths["md"].exists()
+    assert "P38 is fundamental-quality evidence only" in paths["md"].read_text()
