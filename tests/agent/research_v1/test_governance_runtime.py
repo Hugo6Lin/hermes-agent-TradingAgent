@@ -193,3 +193,31 @@ def test_runtime_returns_degraded_on_write_failure(tmp_path: Path):
 
     assert result.status == "governance_degraded"
     assert "write_failure" in result.warnings[0]
+
+
+def test_runtime_blocks_structurally_invalid_config(tmp_path: Path):
+    config_path = tmp_path / "governance_config.json"
+    payload = {
+        "version_readiness": {
+            "version_id": "p35-local",
+            "notes": "missing branch and commit",
+        },
+        "signal_families": [],
+        "expected_artifacts": [],
+        "generation_requests": [],
+        "edge_reviews": [],
+    }
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = run_governance_runtime(
+        GovernanceRuntimeRequest(
+            run_date="2026-04-30",
+            repo_root=tmp_path,
+            output_root=tmp_path / "output" / "governance",
+            config_path=config_path,
+            freshness_policy_days=7,
+        )
+    )
+
+    assert result.status == "blocked_invalid_config"
+    assert "invalid_config" in result.warnings[0]

@@ -239,33 +239,44 @@ def _empty_result(request: GovernanceRuntimeRequest, status: str, warning: str) 
     )
 
 
+def _parse_config(
+    request: GovernanceRuntimeRequest,
+) -> tuple[
+    dict[str, Any],
+    DailyGovernanceRequest,
+    EvidenceArtifactRegistryRequest,
+    tuple[EvidenceGenerationRequest, ...],
+]:
+    config = _load_config(request.config_path)
+    daily_request = DailyGovernanceRequest(
+        run_date=request.run_date,
+        output_root=request.output_root,
+        version_request=_version_request(config),
+        family_requests=_family_requests(config),
+    )
+    registry_request = EvidenceArtifactRegistryRequest(
+        run_date=request.run_date,
+        scan_roots=(request.output_root,),
+        expected_artifacts=_artifact_definitions(config),
+        freshness_policy_days=request.freshness_policy_days,
+    )
+    generation_requests = _generation_requests(config)
+    return config, daily_request, registry_request, generation_requests
+
+
 def run_governance_runtime(request: GovernanceRuntimeRequest) -> GovernanceRuntimeResult:
     output_dir = request.output_root / request.run_date
     try:
-        config = _load_config(request.config_path)
+        config, daily_request, registry_request, gen_requests = _parse_config(request)
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         return _empty_result(request, "blocked_invalid_config", f"invalid_config:{exc.__class__.__name__}")
 
     try:
-        daily = run_daily_governance(
-            DailyGovernanceRequest(
-                run_date=request.run_date,
-                output_root=request.output_root,
-                version_request=_version_request(config),
-                family_requests=_family_requests(config),
-            )
-        )
-        registry = build_evidence_artifact_registry(
-            EvidenceArtifactRegistryRequest(
-                run_date=request.run_date,
-                scan_roots=(request.output_root,),
-                expected_artifacts=_artifact_definitions(config),
-                freshness_policy_days=request.freshness_policy_days,
-            )
-        )
+        daily = run_daily_governance(daily_request)
+        registry = build_evidence_artifact_registry(registry_request)
         generation = build_controlled_evidence_generation_report(
             run_date=request.run_date,
-            requests=_generation_requests(config),
+            requests=gen_requests,
             dry_run_manifest_path=str(output_dir / "evidence_generation_dry_run.json"),
         )
         generation_paths = write_evidence_generation_dry_run_manifest(generation, output_dir)
