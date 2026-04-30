@@ -2109,3 +2109,163 @@ class ResearchDatabase:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def initialize_candidate_pool_schema(self) -> None:
+        """Create candidate_pool_runs and candidate_pool_items tables."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candidate_pool_runs (
+                run_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                universe_id TEXT NOT NULL,
+                source TEXT,
+                status TEXT NOT NULL,
+                candidate_count INTEGER NOT NULL,
+                excluded_count INTEGER NOT NULL,
+                source_hash TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                summary_json TEXT NOT NULL,
+                UNIQUE(as_of_date, universe_id, source_hash)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candidate_pool_items (
+                item_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                universe_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                sector TEXT,
+                currency TEXT,
+                source_date TEXT,
+                candidate_status TEXT NOT NULL,
+                candidate_category TEXT,
+                workflow_action TEXT,
+                rank INTEGER,
+                total_score REAL,
+                component_scores_json TEXT NOT NULL,
+                feature_snapshot_json TEXT NOT NULL,
+                evidence_refs_json TEXT NOT NULL,
+                inclusion_reasons_json TEXT NOT NULL,
+                risk_notes_json TEXT NOT NULL,
+                missing_context_json TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                UNIQUE(run_id, ticker, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_candidate_pool(self, pool: dict) -> str:
+        """Persist a candidate-pool run and items. Idempotent by natural key."""
+        import hashlib as _hashlib
+
+        summary = pool.get("summary", {})
+        run_id = pool.get("run_id", "")
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO candidate_pool_runs (
+                run_id, schema_version, as_of_date, created_at,
+                universe_id, source, status,
+                candidate_count, excluded_count,
+                source_hash, warnings_json, summary_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run_id,
+                pool.get("schema_version", ""),
+                pool["as_of_date"],
+                pool.get("created_at", ""),
+                pool.get("universe_id", ""),
+                pool.get("source"),
+                pool.get("status", ""),
+                summary.get("candidate_count", 0),
+                summary.get("excluded_count", 0),
+                run_id,
+                json.dumps(pool.get("warnings", [])),
+                json.dumps(summary),
+            ),
+        )
+
+        for i, candidate in enumerate(pool.get("candidates", [])):
+            item_key = f"{run_id}|{candidate.get('ticker', '')}|{candidate.get('source_hash', '')}"
+            item_id = _hashlib.sha256(item_key.encode("utf-8")).hexdigest()[:16]
+            cursor.execute(
+                """INSERT OR IGNORE INTO candidate_pool_items (
+                    item_id, run_id, schema_version, as_of_date, created_at,
+                    universe_id, ticker, sector, currency, source_date,
+                    candidate_status, candidate_category, workflow_action, rank,
+                    total_score, component_scores_json, feature_snapshot_json,
+                    evidence_refs_json, inclusion_reasons_json, risk_notes_json,
+                    missing_context_json, source_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    item_id,
+                    run_id,
+                    candidate.get("schema_version", ""),
+                    candidate.get("as_of_date", ""),
+                    candidate.get("created_at", ""),
+                    candidate.get("universe_id", ""),
+                    candidate.get("ticker", ""),
+                    candidate.get("sector"),
+                    candidate.get("currency"),
+                    candidate.get("source_date"),
+                    candidate.get("candidate_status", ""),
+                    candidate.get("candidate_category"),
+                    candidate.get("workflow_action"),
+                    i + 1,
+                    candidate.get("total_score"),
+                    json.dumps(candidate.get("component_scores", {})),
+                    json.dumps(candidate.get("feature_snapshot", {})),
+                    json.dumps(candidate.get("evidence_refs", {})),
+                    json.dumps(candidate.get("inclusion_reasons", [])),
+                    json.dumps(candidate.get("risk_notes", [])),
+                    json.dumps(candidate.get("missing_context", [])),
+                    candidate.get("source_hash", ""),
+                ),
+            )
+
+        conn.commit()
+        conn.close()
+        return run_id
+
+    def list_candidate_pool_runs(
+        self,
+        as_of_date: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """List persisted candidate-pool runs."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        conditions: list[str] = []
+        params: list[Any] = []
+        if as_of_date:
+            conditions.append("as_of_date = ?")
+            params.append(as_of_date)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+        cursor.execute(
+            f"SELECT * FROM candidate_pool_runs {where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def list_candidate_pool_items(self, run_id: str) -> list[dict]:
+        """List items for a specific candidate-pool run."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM candidate_pool_items WHERE run_id = ? ORDER BY rank",
+            (run_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
