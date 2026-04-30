@@ -2622,3 +2622,103 @@ class ResearchDatabase:
             except (json.JSONDecodeError, TypeError):
                 d[key] = [] if "themes" in col or "risk" in col or "missing" in col else {}
         return d
+
+    def get_latest_candidate_pool_run_as_of(self, as_of_date: str) -> dict | None:
+        self.initialize_candidate_pool_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM candidate_pool_runs
+               WHERE as_of_date <= ?
+               ORDER BY as_of_date DESC, created_at DESC, run_id ASC
+               LIMIT 1""",
+            (as_of_date,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_latest_decision_journal_entry(self, ticker: str, as_of_date: str) -> dict | None:
+        self.initialize_decision_journal_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM decision_journal_entries
+               WHERE ticker = ? AND as_of_date <= ?
+               ORDER BY as_of_date DESC, created_at DESC, journal_id ASC
+               LIMIT 1""",
+            (ticker, as_of_date),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def initialize_boss_copilot_brief_schema(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS boss_copilot_daily_briefs (
+                brief_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                priority_count INTEGER NOT NULL,
+                manual_review_count INTEGER NOT NULL,
+                source_hash TEXT NOT NULL,
+                brief_json TEXT NOT NULL,
+                UNIQUE(as_of_date, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_boss_copilot_daily_brief(self, brief: dict) -> str:
+        self.initialize_boss_copilot_brief_schema()
+        summary = brief.get("summary", {})
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO boss_copilot_daily_briefs (
+                brief_id, schema_version, as_of_date, created_at,
+                status, priority_count, manual_review_count,
+                source_hash, brief_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                brief["brief_id"],
+                brief["schema_version"],
+                brief["as_of_date"],
+                brief.get("created_at", ""),
+                brief.get("status", ""),
+                summary.get("priority_count", 0),
+                summary.get("manual_review_count", 0),
+                brief["source_hash"],
+                json.dumps(brief),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return brief["brief_id"]
+
+    def list_boss_copilot_daily_briefs(self, as_of_date: str | None = None, limit: int = 20) -> list[dict]:
+        self.initialize_boss_copilot_brief_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if as_of_date:
+            cursor.execute(
+                """SELECT * FROM boss_copilot_daily_briefs
+                   WHERE as_of_date = ?
+                   ORDER BY created_at DESC, brief_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+        else:
+            cursor.execute(
+                """SELECT * FROM boss_copilot_daily_briefs
+                   ORDER BY as_of_date DESC, created_at DESC, brief_id ASC
+                   LIMIT ?""",
+                (limit,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
