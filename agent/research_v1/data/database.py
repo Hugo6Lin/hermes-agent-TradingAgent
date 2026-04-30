@@ -2722,3 +2722,74 @@ class ResearchDatabase:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def initialize_copilot_console_index_schema(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS copilot_console_indexes (
+                index_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                lookback_days INTEGER NOT NULL,
+                day_count INTEGER NOT NULL,
+                latest_day TEXT,
+                source_hash TEXT NOT NULL,
+                index_json TEXT NOT NULL,
+                UNIQUE(as_of_date, lookback_days, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_copilot_console_index(self, index: dict) -> str:
+        self.initialize_copilot_console_index_schema()
+        summary = index.get("summary", {})
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO copilot_console_indexes (
+                index_id, schema_version, as_of_date, created_at, status,
+                lookback_days, day_count, latest_day, source_hash, index_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                index["index_id"],
+                index["schema_version"],
+                index["as_of_date"],
+                index.get("created_at", ""),
+                index.get("status", ""),
+                index.get("lookback_days", 0),
+                summary.get("day_count", 0),
+                summary.get("latest_day", ""),
+                index["source_hash"],
+                json.dumps(index),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return index["index_id"]
+
+    def list_copilot_console_indexes(self, as_of_date: str | None = None, limit: int = 20) -> list[dict]:
+        self.initialize_copilot_console_index_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if as_of_date:
+            cursor.execute(
+                """SELECT * FROM copilot_console_indexes
+                   WHERE as_of_date = ?
+                   ORDER BY created_at DESC, index_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+        else:
+            cursor.execute(
+                """SELECT * FROM copilot_console_indexes
+                   ORDER BY as_of_date DESC, created_at DESC, index_id ASC
+                   LIMIT ?""",
+                (limit,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
