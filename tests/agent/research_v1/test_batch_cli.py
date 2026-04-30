@@ -632,3 +632,69 @@ def test_candidate_pool_run_cli_rejects_negative_max_candidates(tmp_path, capsys
 
     assert code == 2
     assert "invalid candidate-pool-run input" in capsys.readouterr().out
+
+
+# ── P40 memory-pack-run CLI tests ────────────────────────────────────────
+
+def test_memory_pack_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "completed",
+            "output_dir": str(output_dir),
+            "ticker_count": 1,
+            "memory_available": 0,
+            "limited_memory": 0,
+            "no_prior_memory": 1,
+            "warning_count": 0,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_research_memory_pack", fake_run)
+
+    code = main(["--app-root", str(app_root), "memory-pack-run", "--tickers", "aapl", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Research memory status: completed" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_memory_pack_run_cli_rejects_empty_tickers(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "memory-pack-run", "--tickers", " , ", "--as-of-date", "2026-04-30"])
+
+    assert code == 2
+    assert "invalid memory-pack-run input" in capsys.readouterr().out
+
+
+def test_memory_pack_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "memory-pack-run", "--tickers", "AAPL", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid date format" in capsys.readouterr().out
+
+
+def test_memory_pack_run_cli_requires_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "memory-pack-run", "--tickers", "AAPL"])
+
+    assert code == 2
+    assert "--as-of-date is required" in capsys.readouterr().out
+
+
+def test_memory_pack_run_cli_rejects_negative_lookback(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "memory-pack-run", "--tickers", "AAPL", "--as-of-date", "2026-04-30", "--lookback-days", "-1"])
+
+    assert code == 2
+    assert "lookback-days must be positive" in capsys.readouterr().out

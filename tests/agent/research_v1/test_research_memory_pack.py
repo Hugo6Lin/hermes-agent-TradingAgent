@@ -293,3 +293,36 @@ def test_memory_artifacts_are_written_and_safe(tmp_path: Path):
     assert paths["json"].name == "p40_research_memory_pack.json"
     assert "p40 is research-memory evidence only" in text
     assert "trade now" not in text
+
+
+# ── P40-C run orchestration and hard-boundary tests ──────────────────────
+
+from agent.research_v1.research_memory_pack import run_research_memory_pack
+
+
+def test_run_research_memory_pack_persists_and_writes_artifacts(tmp_path: Path):
+    db = _db(tmp_path)
+    result = run_research_memory_pack(
+        db=db,
+        tickers=["AAPL"],
+        as_of_date="2026-04-30",
+        lookback_days=180,
+        output_root=tmp_path / "output" / "governance",
+    )
+
+    assert result["ticker_count"] == 1
+    assert (Path(result["output_dir"]) / "p40_research_memory_pack.json").exists()
+
+
+def test_p40_hard_boundaries_are_explicit():
+    from agent.research_v1 import research_memory_pack as p40
+
+    forbidden_names = {
+        "broker", "order", "train_model", "scheduler", "notification",
+        "HermesResearchApp", "run_research", "final_judge", "JudgeInputPacket",
+        "CanonicalSignal", "CanonicalReport", "run_governance_runtime",
+        "run_recommendation_outcome_tracking", "run_market_regime_context",
+        "run_fundamental_quality", "run_candidate_pool", "_extract_thesis_inputs",
+    }
+    assert not (forbidden_names & set(p40.__dict__))
+    assert "research-memory evidence only" in p40.P40_ARTIFACT_DISCLAIMER
