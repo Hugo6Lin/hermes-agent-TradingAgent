@@ -246,14 +246,14 @@ def _regime_score(
             sector_scores = sector_scores_raw
         if sector in sector_scores:
             return round(float(sector_scores[sector]) * confidence, 4)
-        # Derive from regime label
+        # Derive from regime label — check explicit sector overrides first
         fallback = P39_REGIME_LABEL_FALLBACK.get(regime_label, P39_REGIME_LABEL_FALLBACK["neutral"])
-        if sector in P39_CYCLICAL_SECTORS:
+        if sector in fallback:
+            base = fallback[sector]
+        elif sector in P39_CYCLICAL_SECTORS:
             base = fallback.get("cyclical", fallback.get("default", 0.50))
         elif sector in P39_DEFENSIVE_SECTORS:
             base = fallback.get("defensive", fallback.get("default", 0.50))
-        elif sector in ("technology", "communication_services"):
-            base = fallback.get(sector, fallback.get("default", 0.50))
         else:
             base = fallback.get("default", 0.50)
         return round(base * confidence, 4)
@@ -545,6 +545,7 @@ def build_candidate_pool(
         "created_at": now,
         "universe_id": universe_id,
         "source": source,
+        "source_hash": source_hash,
         "status": status,
         "candidates": candidates,
         "excluded_items": excluded_items,
@@ -665,21 +666,30 @@ def run_candidate_pool(
     db.initialize_candidate_pool_schema()
 
     # Read-only P37 regime context (table may not exist yet)
+    # Use latest snapshot at or before as_of_date
     regime_context = None
-    if hasattr(db, "list_market_regime_snapshots"):
+    if hasattr(db, "list_market_regime_snapshots_as_of"):
         try:
-            regimes = db.list_market_regime_snapshots(as_of_date=effective_as_of, limit=1)
-            regime_context = regimes[0] if regimes else None
+            regimes = db.list_market_regime_snapshots_as_of(as_of_date=effective_as_of, limit=1)
+            if regimes:
+                raw_regime = regimes[0]
+                regime_context = {
+                    "regime_label": raw_regime.get("regime_label", "neutral"),
+                    "confidence": raw_regime.get("confidence", 0.5),
+                    "sector_scores_json": raw_regime.get("sector_rotation_json", "{}"),
+                    "source_hash": raw_regime.get("data_source_hash", ""),
+                }
         except Exception:
             pass
 
     # Read-only P38 quality reports (table may not exist yet)
+    # Use latest report at or before as_of_date
     quality_by_ticker: dict[str, dict[str, Any]] = {}
-    if hasattr(db, "list_fundamental_quality_reports"):
+    if hasattr(db, "list_fundamental_quality_reports_as_of"):
         try:
             for row in input_payload.get("tickers", []):
                 if isinstance(row, dict) and row.get("ticker"):
-                    reports = db.list_fundamental_quality_reports(
+                    reports = db.list_fundamental_quality_reports_as_of(
                         ticker=row["ticker"], as_of_date=effective_as_of, limit=1
                     )
                     if reports:

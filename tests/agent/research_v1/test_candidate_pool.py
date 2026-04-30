@@ -271,3 +271,127 @@ def test_p39_hard_boundaries_are_explicit():
     }
     assert not (forbidden_names & set(p39.__dict__))
     assert "candidate-discovery evidence only" in p39.P39_ARTIFACT_DISCLAIMER
+
+
+# ── P39 audit fix regressions ────────────────────────────────────────────────
+
+def test_risk_on_narrow_technology_scores_explicit_sector_override():
+    """risk_on_narrow: technology must score 0.70 * confidence, not cyclical fallback 0.45."""
+    regime = {
+        "regime_label": "risk_on_narrow",
+        "confidence": 1.0,
+        "sector_scores_json": "{}",
+        "source_hash": "rn1",
+    }
+    pool = build_candidate_pool(_payload([_ticker(sector="technology")]), "2026-04-30", regime_context=regime)
+    c = pool["candidates"][0]
+    assert c["component_scores"]["regime_score"] == 0.70
+
+
+def test_candidate_pool_source_hash_is_in_top_level_and_differs_from_run_id(tmp_path: Path):
+    db = _db(tmp_path)
+    pool = build_candidate_pool(_payload([_ticker()]), "2026-04-30")
+    assert "source_hash" in pool
+    assert pool["source_hash"] != pool["run_id"]
+
+    run_id = db.save_candidate_pool(pool)
+    runs = db.list_candidate_pool_runs(as_of_date="2026-04-30")
+    assert len(runs) == 1
+    assert runs[0]["source_hash"] == pool["source_hash"]
+    assert runs[0]["source_hash"] != run_id
+
+
+def test_run_candidate_pool_uses_prior_day_p37_evidence(tmp_path: Path):
+    """P39 should use the latest P37 snapshot at or before as_of_date."""
+    from agent.research_v1.data.database import ResearchDatabase
+
+    db = ResearchDatabase(str(tmp_path / "research.db"))
+    db.initialize()
+    db.initialize_market_regime_schema()
+    db.initialize_candidate_pool_schema()
+
+    # Persist a regime snapshot for 2026-04-29
+    db.save_market_regime_snapshot({
+        "schema_version": "p37_market_regime.1",
+        "as_of_date": "2026-04-29",
+        "created_at": "2026-04-29T12:00:00+00:00",
+        "regime_label": "risk_on_broad",
+        "confidence": 0.90,
+        "coverage_ratio": 0.95,
+        "classification": "risk_on_broad",
+        "summary": "risk on broad",
+        "sector_rotation": {"ranked_sectors": []},
+        "classification_reasons": [],
+        "volatility_proxy": 0.20,
+        "drawdown_proxy": -0.05,
+        "breadth_above_sma_20": 0.65,
+        "missing_symbols": [],
+        "stale_symbols": [],
+        "data_source_hash": "prior_regime",
+    })
+
+    payload = _payload([_ticker()])
+    result = run_candidate_pool(
+        db=db,
+        input_payload=payload,
+        as_of_date="2026-04-30",
+        output_root=tmp_path / "output" / "governance",
+    )
+
+    assert result["status"] == "completed"
+    # Should NOT have missing_market_regime_context since prior-day snapshot exists
+    pool_json = Path(result["output_dir"]) / "p39_candidate_pool.json"
+    pool_data = json.loads(pool_json.read_text(encoding="utf-8"))
+    candidate = pool_data["candidates"][0]
+    assert "missing_market_regime_context" not in candidate["missing_context"]
+    assert candidate["evidence_refs"].get("p37_regime_source_hash") == "prior_regime"
+
+
+def test_run_candidate_pool_uses_prior_day_p38_evidence(tmp_path: Path):
+    """P39 should use the latest P38 report at or before as_of_date."""
+    from agent.research_v1.data.database import ResearchDatabase
+
+    db = ResearchDatabase(str(tmp_path / "research.db"))
+    db.initialize()
+    db.initialize_fundamental_quality_schema()
+    db.initialize_candidate_pool_schema()
+
+    # Persist a quality report for 2026-04-29
+    db.save_fundamental_quality_report({
+        "schema_version": "p38_fundamental_quality.1",
+        "as_of_date": "2026-04-29",
+        "created_at": "2026-04-29T12:00:00+00:00",
+        "ticker": "AAPL",
+        "sector": "technology",
+        "currency": "USD",
+        "status": "completed",
+        "quality_label": "compounder_quality",
+        "overall_quality_score": 0.85,
+        "confidence": 0.90,
+        "coverage_ratio": 1.0,
+        "usable_row_count": 5,
+        "ignored_future_row_count": 0,
+        "dimension_scores": {},
+        "latest_metrics": {},
+        "trend_metrics": {},
+        "red_flags": [],
+        "missing_required_fields": [],
+        "warnings": [],
+        "source_hash": "prior_quality",
+        "summary": "AAPL: compounder_quality",
+    })
+
+    payload = _payload([_ticker()])
+    result = run_candidate_pool(
+        db=db,
+        input_payload=payload,
+        as_of_date="2026-04-30",
+        output_root=tmp_path / "output" / "governance",
+    )
+
+    assert result["status"] == "completed"
+    pool_json = Path(result["output_dir"]) / "p39_candidate_pool.json"
+    pool_data = json.loads(pool_json.read_text(encoding="utf-8"))
+    candidate = pool_data["candidates"][0]
+    assert "missing_fundamental_quality" not in candidate["missing_context"]
+    assert candidate["evidence_refs"].get("p38_quality_source_hash") == "prior_quality"

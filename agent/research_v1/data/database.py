@@ -2000,6 +2000,18 @@ class ResearchDatabase:
         conn.close()
         return [dict(row) for row in rows]
 
+    def list_market_regime_snapshots_as_of(self, as_of_date: str, limit: int = 1) -> list[dict]:
+        """Get the latest regime snapshot at or before the given as_of_date."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM market_regime_snapshots WHERE as_of_date <= ? ORDER BY as_of_date DESC LIMIT ?",
+            (as_of_date, limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
     # ── P38 Fundamental Quality Reports ──────────────────────────────────────
 
     def initialize_fundamental_quality_schema(self) -> None:
@@ -2110,6 +2122,23 @@ class ResearchDatabase:
         conn.close()
         return [dict(row) for row in rows]
 
+    def list_fundamental_quality_reports_as_of(
+        self,
+        ticker: str,
+        as_of_date: str,
+        limit: int = 1,
+    ) -> list[dict]:
+        """Get the latest quality report for a ticker at or before the given as_of_date."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM fundamental_quality_reports WHERE ticker = ? AND as_of_date <= ? ORDER BY as_of_date DESC LIMIT ?",
+            (ticker, as_of_date, limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
     def initialize_candidate_pool_schema(self) -> None:
         """Create candidate_pool_runs and candidate_pool_items tables."""
         conn = self._get_connection()
@@ -2187,7 +2216,7 @@ class ResearchDatabase:
                 pool.get("status", ""),
                 summary.get("candidate_count", 0),
                 summary.get("excluded_count", 0),
-                run_id,
+                pool.get("source_hash", run_id),
                 json.dumps(pool.get("warnings", [])),
                 json.dumps(summary),
             ),
