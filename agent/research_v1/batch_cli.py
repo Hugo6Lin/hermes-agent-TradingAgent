@@ -22,6 +22,7 @@ from agent.research_v1.evidence_refresh_planner import run_evidence_refresh_plan
 from agent.research_v1.market_data_readiness import run_market_data_readiness
 from agent.research_v1.research_context_pack import run_research_context_pack
 from agent.research_v1.research_context_prompt_pack import run_research_context_prompt_pack
+from agent.research_v1.boss_preview_runner import run_boss_preview
 from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
@@ -809,6 +810,62 @@ def _cmd_research_context_prompt_pack_run(
     return 0
 
 
+def _cmd_boss_preview_run(
+    paths: HermesPaths,
+    tickers: str,
+    as_of_date: str | None,
+    output_root: str,
+    governance_root: str,
+    live: bool,
+    max_candidates: int,
+) -> int:
+    from datetime import date as _date
+
+    effective_date = as_of_date or _date.today().isoformat()
+    try:
+        _date.fromisoformat(effective_date)
+    except (ValueError, TypeError):
+        print(f"invalid boss-preview-run input: invalid date format '{effective_date}'")
+        return 2
+    if max_candidates <= 0:
+        print("invalid boss-preview-run input: max-candidates must be positive")
+        return 2
+
+    ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
+    if not ticker_list:
+        print("invalid boss-preview-run input: tickers required")
+        return 2
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+
+    database = _ensure_database(paths)
+    result = run_boss_preview(
+        db=database,
+        tickers=ticker_list,
+        as_of_date=effective_date,
+        output_root=output_path.resolve(),
+        governance_root=governance_path.resolve(),
+        live=live,
+        max_candidates=max_candidates,
+    )
+    if result.get("status") == "boss_preview_blocked_invalid_input":
+        print(f"invalid boss-preview-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Boss preview status: {result['status']}")
+    print(f"Preview id: {result['preview_id']}")
+    print(f"Tickers: {', '.join(result['tickers'])}")
+    print(f"Top candidates: {', '.join(result.get('top_candidates', [])) or 'none'}")
+    for path in result.get("artifact_paths", []):
+        if str(path).endswith("boss_preview.md"):
+            print(f"Boss report: {path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -994,6 +1051,15 @@ def build_parser() -> argparse.ArgumentParser:
     prompt_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
     prompt_parser.add_argument("--output-root", default="output/governance", help="Output root for prompt pack artifacts.")
 
+    preview_parser = subparsers.add_parser("boss-preview-run", help="Run one-command boss preview from tickers.")
+    preview_parser.add_argument("--tickers", required=True, help="Comma-separated ticker symbols.")
+    preview_parser.add_argument("--as-of-date", default=None, help="Preview date YYYY-MM-DD; default today.")
+    preview_parser.add_argument("--output-root", default="output/governance", help="Governance output root.")
+    preview_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
+    preview_parser.add_argument("--live", dest="live", action="store_true", default=True, help="Enable live Futu readiness by default.")
+    preview_parser.add_argument("--no-live", dest="live", action="store_false", help="Disable live Futu calls.")
+    preview_parser.add_argument("--max-candidates", default=8, type=int, help="Maximum preview candidates.")
+
     return parser
 
 
@@ -1135,6 +1201,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_block_chars=args.max_block_chars,
             governance_root=args.governance_root,
             output_root=args.output_root,
+        )
+    if args.command == "boss-preview-run":
+        return _cmd_boss_preview_run(
+            paths,
+            tickers=args.tickers,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+            governance_root=args.governance_root,
+            live=args.live,
+            max_candidates=args.max_candidates,
         )
 
     parser.print_help()

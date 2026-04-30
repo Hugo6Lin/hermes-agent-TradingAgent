@@ -1207,3 +1207,45 @@ def test_research_context_prompt_pack_cli_passes_params(monkeypatch, tmp_path, c
     assert captured["tickers"] == ["AAPL", "MSFT"]
     assert captured["roles"] == ["fundamentals", "risk"]
     assert captured["max_block_chars"] == 800
+
+
+# --- P49 CLI tests ---
+
+
+def test_boss_preview_run_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+    (tmp_path / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "boss_preview_limited",
+            "preview_id": "p49-2026-05-01-abc",
+            "tickers": ["NVDA", "AMZN"],
+            "top_candidates": ["NVDA"],
+            "warnings": [],
+            "artifact_paths": [str(tmp_path / "output" / "governance" / "2026-05-01" / "boss_preview.md")],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_preview", fake_run)
+    code = main(["--app-root", str(tmp_path), "boss-preview-run", "--tickers", "NVDA,AMZN", "--as-of-date", "2026-05-01"])
+    assert code == 0
+    assert captured["live"] is True
+    assert captured["tickers"] == ["NVDA", "AMZN"]
+    assert "Boss preview status: boss_preview_limited" in capsys.readouterr().out
+
+
+def test_boss_preview_run_cli_supports_no_live(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+    (tmp_path / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"status": "boss_preview_limited", "preview_id": "p49", "tickers": ["NVDA"], "top_candidates": [], "warnings": [], "artifact_paths": []}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_preview", fake_run)
+    code = main(["--app-root", str(tmp_path), "boss-preview-run", "--tickers", "NVDA", "--as-of-date", "2026-05-01", "--no-live"])
+    assert code == 0
+    assert captured["live"] is False
