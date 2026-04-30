@@ -1137,3 +1137,73 @@ def test_research_context_pack_cli_passes_params(monkeypatch, tmp_path, capsys):
     assert captured["tickers"] == ["NVDA"]
     assert captured["lookback_days"] == 90
     assert captured["max_items_per_ticker"] == 4
+
+
+def test_research_context_prompt_pack_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    (tmp_path / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "prompt_pack_ready",
+            "prompt_pack_id": "p48-2026-05-01-abc",
+            "tickers": ["AAPL"],
+            "roles": ["risk"],
+            "omitted_context": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_research_context_prompt_pack", fake_run)
+    code = main(["--app-root", str(tmp_path), "research-context-prompt-pack-run", "--as-of-date", "2026-05-01", "--tickers", "AAPL", "--roles", "risk"])
+
+    assert code == 0
+    assert captured["roles"] == ["risk"]
+    out = capsys.readouterr().out
+    assert "Research context prompt pack status: prompt_pack_ready" in out
+
+
+def test_research_context_prompt_pack_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "research-context-prompt-pack-run", "--as-of-date", "bad-date", "--tickers", "AAPL"])
+
+    assert code == 2
+    assert "invalid research-context-prompt-pack-run input" in capsys.readouterr().out
+
+
+def test_research_context_prompt_pack_cli_rejects_non_positive_max_block(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "research-context-prompt-pack-run", "--as-of-date", "2026-05-01", "--tickers", "AAPL", "--max-block-chars", "0"])
+
+    assert code == 2
+    assert "max-block-chars must be positive" in capsys.readouterr().out
+
+
+def test_research_context_prompt_pack_cli_passes_params(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    (tmp_path / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "prompt_pack_ready",
+            "prompt_pack_id": "p48-2026-05-01-xxx",
+            "tickers": ["AAPL", "MSFT"],
+            "roles": ["fundamentals", "risk"],
+            "omitted_context": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_research_context_prompt_pack", fake_run)
+    code = main(["--app-root", str(tmp_path), "research-context-prompt-pack-run", "--as-of-date", "2026-05-01", "--tickers", "AAPL,MSFT", "--roles", "fundamentals,risk", "--max-block-chars", "800"])
+
+    assert code == 0
+    assert captured["tickers"] == ["AAPL", "MSFT"]
+    assert captured["roles"] == ["fundamentals", "risk"]
+    assert captured["max_block_chars"] == 800

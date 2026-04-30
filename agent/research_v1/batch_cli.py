@@ -21,6 +21,7 @@ from agent.research_v1.evidence_freshness_drift_monitor import run_evidence_fres
 from agent.research_v1.evidence_refresh_planner import run_evidence_refresh_planner
 from agent.research_v1.market_data_readiness import run_market_data_readiness
 from agent.research_v1.research_context_pack import run_research_context_pack
+from agent.research_v1.research_context_prompt_pack import run_research_context_prompt_pack
 from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
@@ -756,6 +757,58 @@ def _cmd_research_context_pack_run(
     return 0
 
 
+def _cmd_research_context_prompt_pack_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    tickers: str,
+    roles: str,
+    max_block_chars: int,
+    governance_root: str,
+    output_root: str,
+) -> int:
+    from datetime import date as _date
+
+    try:
+        _date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid research-context-prompt-pack-run input: invalid date format '{as_of_date}'")
+        return 2
+    if not tickers:
+        print("invalid research-context-prompt-pack-run input: tickers required")
+        return 2
+    if max_block_chars <= 0:
+        print("invalid research-context-prompt-pack-run input: max-block-chars must be positive")
+        return 2
+    ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
+    role_list = [r.strip() for r in roles.split(",") if r.strip()] if roles.strip() else None
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    database = _ensure_database(paths)
+    result = run_research_context_prompt_pack(
+        db=database,
+        governance_root=governance_path.resolve(),
+        output_root=output_path.resolve(),
+        as_of_date=as_of_date,
+        tickers=ticker_list,
+        roles=role_list,
+        max_block_chars=max_block_chars,
+    )
+    if result.get("status") in {"blocked_invalid_input", "blocked_missing_context"}:
+        print(f"invalid research-context-prompt-pack-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Research context prompt pack status: {result['status']}")
+    print(f"Prompt pack id: {result['prompt_pack_id']}")
+    print(f"Tickers: {', '.join(result['tickers'])}")
+    print(f"Roles: {', '.join(result['roles'])}")
+    print(f"Omitted context: {len(result['omitted_context'])}")
+    print(f"Warnings: {len(result['warnings'])}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -933,6 +986,14 @@ def build_parser() -> argparse.ArgumentParser:
     ctx_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
     ctx_parser.add_argument("--output-root", default="output/governance", help="Output root for context pack artifacts.")
 
+    prompt_parser = subparsers.add_parser("research-context-prompt-pack-run", help="Run P48 research context prompt-pack dry-run.")
+    prompt_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    prompt_parser.add_argument("--tickers", required=True, help="Comma-separated ticker symbols.")
+    prompt_parser.add_argument("--roles", default="", help="Comma-separated role names (default: all supported).")
+    prompt_parser.add_argument("--max-block-chars", type=int, default=1200, help="Max chars per role context block.")
+    prompt_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
+    prompt_parser.add_argument("--output-root", default="output/governance", help="Output root for prompt pack artifacts.")
+
     return parser
 
 
@@ -1062,6 +1123,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             tickers=args.tickers,
             lookback_days=args.lookback_days,
             max_items_per_ticker=args.max_items_per_ticker,
+            governance_root=args.governance_root,
+            output_root=args.output_root,
+        )
+    if args.command == "research-context-prompt-pack-run":
+        return _cmd_research_context_prompt_pack_run(
+            paths,
+            as_of_date=args.as_of_date,
+            tickers=args.tickers,
+            roles=args.roles,
+            max_block_chars=args.max_block_chars,
             governance_root=args.governance_root,
             output_root=args.output_root,
         )
