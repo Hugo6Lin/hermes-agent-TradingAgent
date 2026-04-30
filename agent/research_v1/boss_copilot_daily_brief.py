@@ -159,6 +159,7 @@ def _build_priority(candidate: dict, regime_snapshot: dict | None, quality: dict
 
     return {
         "rank": 0,
+        "candidate_rank": int(candidate.get("rank", 999999) or 999999),
         "ticker": ticker,
         "sector": candidate.get("sector"),
         "priority_score": score,
@@ -207,7 +208,7 @@ def build_boss_copilot_daily_brief(
         )
         for c in selected_items
     ]
-    priorities.sort(key=lambda p: (-p["priority_score"], int((candidate_run or {}).get("rank", 0) or 0), p["ticker"]))
+    priorities.sort(key=lambda p: (-p["priority_score"], p["candidate_rank"], p["ticker"]))
     for idx, priority in enumerate(priorities, start=1):
         priority["rank"] = idx
 
@@ -322,6 +323,12 @@ def write_boss_copilot_daily_brief_artifacts(brief: dict[str, Any], output_dir: 
 
 
 def run_boss_copilot_daily_brief(db: Any, as_of_date: str, output_root: Path, max_priorities: int = 8) -> dict[str, Any]:
+    from datetime import date as _date
+
+    try:
+        _date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        return {"status": P42_STATUS_BLOCKED_INVALID_INPUT, "warnings": ["invalid_date_format"]}
     if max_priorities <= 0:
         return {"status": P42_STATUS_BLOCKED_INVALID_INPUT, "warnings": ["max_priorities_must_be_positive"]}
 

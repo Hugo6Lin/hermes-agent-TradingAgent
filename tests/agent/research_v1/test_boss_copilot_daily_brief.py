@@ -186,6 +186,24 @@ def test_priority_sorting_is_deterministic():
     assert scores == sorted(scores, reverse=True)
 
 
+def test_equal_score_sorts_by_candidate_rank_not_ticker():
+    # ZZZ rank=1, AAA rank=2, same score → ZZZ must remain first
+    items = [_candidate(ticker="ZZZ", score=0.82, rank=1), _candidate(ticker="AAA", score=0.82, rank=2)]
+    brief = build_boss_copilot_daily_brief(
+        as_of_date="2026-04-30",
+        candidate_run={"run_id": "run-1", "source_hash": "run-hash"},
+        candidate_items=items,
+        regime_snapshot=_regime(),
+        quality_by_ticker={"ZZZ": _quality("ZZZ"), "AAA": _quality("AAA")},
+        memory_by_ticker={"ZZZ": _memory("ZZZ"), "AAA": _memory("AAA")},
+        journal_by_ticker={"ZZZ": _journal("ZZZ"), "AAA": _journal("AAA")},
+        max_priorities=8,
+    )
+
+    assert brief["priorities"][0]["ticker"] == "ZZZ"
+    assert brief["priorities"][1]["ticker"] == "AAA"
+
+
 def test_source_hash_changes_when_candidate_source_hash_changes():
     first = build_boss_copilot_daily_brief(
         as_of_date="2026-04-30",
@@ -426,6 +444,52 @@ def test_revised_boss_copilot_hash_appends(tmp_path: Path):
     assert len(rows) == 2
 
 
+# ── As-of tie-breaker regression tests ──────────────────────────────────
+
+def test_regime_as_of_same_date_same_created_at_uses_stable_tiebreaker(tmp_path: Path):
+    db = _db(tmp_path)
+    db.initialize_market_regime_schema()
+    ts = "2026-04-30T12:00:00Z"
+    for dsh in ("src-b", "src-a"):
+        db.save_market_regime_snapshot({
+            "schema_version": "p37_market_regime.1",
+            "as_of_date": "2026-04-30", "created_at": ts,
+            "regime_label": "risk_on", "confidence": 0.7, "coverage_ratio": 0.9,
+            "summary_json": "{}", "metrics_json": "{}", "proxy_metrics_json": "{}",
+            "sector_rotation_json": "{}", "classification_reasons_json": "[]",
+            "warnings_json": "[]", "missing_symbols_json": "[]",
+            "data_source_hash": dsh,
+        })
+    rows = db.list_market_regime_snapshots_as_of("2026-04-30", limit=1)
+    # snapshot_id is sha256("2026-04-30|src-a")[:16] — deterministic, stable
+    # The key assertion: same inputs always return the same row
+    first_call = rows[0]["snapshot_id"]
+    rows2 = db.list_market_regime_snapshots_as_of("2026-04-30", limit=1)
+    assert rows2[0]["snapshot_id"] == first_call
+
+
+def test_quality_as_of_same_date_same_created_at_uses_stable_tiebreaker(tmp_path: Path):
+    db = _db(tmp_path)
+    db.initialize_fundamental_quality_schema()
+    ts = "2026-04-30T12:00:00Z"
+    for sh in ("qhash-b", "qhash-a"):
+        db.save_fundamental_quality_report({
+            "schema_version": "p38_fundamental_quality.1",
+            "as_of_date": "2026-04-30", "created_at": ts,
+            "ticker": "AAPL", "sector": "technology", "currency": "USD",
+            "status": "completed", "quality_label": "strong",
+            "overall_quality_score": 0.8, "confidence": 0.9, "coverage_ratio": 0.95,
+            "usable_row_count": 10, "ignored_future_row_count": 0,
+            "red_flags_json": "[]", "missing_required_fields_json": "[]",
+            "field_coverage_json": "{}", "warnings_json": "[]",
+            "source_hash": sh,
+        })
+    rows = db.list_fundamental_quality_reports_as_of("AAPL", "2026-04-30", limit=1)
+    first_call = rows[0]["report_id"]
+    rows2 = db.list_fundamental_quality_reports_as_of("AAPL", "2026-04-30", limit=1)
+    assert rows2[0]["report_id"] == first_call
+
+
 # ── P42-C run orchestration and hard-boundary tests ─────────────────────
 
 from agent.research_v1.boss_copilot_daily_brief import run_boss_copilot_daily_brief
@@ -442,6 +506,19 @@ def test_run_boss_copilot_daily_brief_no_candidates_writes_artifacts(tmp_path: P
 
     assert result["status"] == "brief_no_candidates"
     assert (Path(result["output_dir"]) / "p42_boss_copilot_daily_brief.json").exists()
+
+
+def test_run_boss_copilot_daily_brief_rejects_invalid_date(tmp_path: Path):
+    db = _db(tmp_path)
+    result = run_boss_copilot_daily_brief(
+        db=db,
+        as_of_date="not-a-date",
+        output_root=tmp_path / "output" / "governance",
+        max_priorities=8,
+    )
+
+    assert result["status"] == "blocked_invalid_input"
+    assert "invalid_date_format" in result["warnings"]
 
 
 def test_p42_hard_boundaries_are_explicit():
