@@ -36,6 +36,13 @@ P41_ALLOWED_ACTIONS = (
 P41_FORBIDDEN_ACTION_FRAGMENTS = ("buy", "sell", "short", "call", "put", "trade_now")
 P41_REQUIRED_FIELDS = ("ticker", "contemplated_action", "decision_intent", "stated_reason", "boss_confidence", "urgency")
 
+P41_ALLOWED_INTENTS = (
+    "review_before_action",
+    "postpone_decision",
+    "compare_with_prior",
+    "journal_only",
+)
+
 SEVERITY_RANK = {SEVERITY_INFO: 0, SEVERITY_CAUTION: 1, SEVERITY_SLOW_DOWN: 2, SEVERITY_MANUAL_REVIEW: 3}
 
 
@@ -55,6 +62,9 @@ def validate_decision_item(item: dict[str, Any]) -> list[str]:
         errors.append("invalid_contemplated_action")
     if any(fragment in action for fragment in P41_FORBIDDEN_ACTION_FRAGMENTS):
         errors.append("forbidden_contemplated_action")
+    intent = str(item.get("decision_intent", "")).lower()
+    if intent and intent not in P41_ALLOWED_INTENTS:
+        errors.append("invalid_decision_intent")
     try:
         confidence = float(item.get("boss_confidence", 0))
         if confidence < 0 or confidence > 1:
@@ -64,11 +74,34 @@ def validate_decision_item(item: dict[str, Any]) -> list[str]:
     return sorted(set(errors))
 
 
+def _normalize_decision_for_hash(decision: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    normalized["ticker"] = _normalize_ticker(decision.get("ticker", ""))
+    normalized["contemplated_action"] = str(decision.get("contemplated_action", "")).strip().lower()
+    normalized["decision_intent"] = str(decision.get("decision_intent", "")).strip().lower()
+    normalized["stated_reason"] = str(decision.get("stated_reason", "")).strip()
+    try:
+        normalized["boss_confidence"] = round(float(decision.get("boss_confidence", 0)), 6)
+    except (TypeError, ValueError):
+        normalized["boss_confidence"] = 0.0
+    normalized["urgency"] = str(decision.get("urgency", "")).strip().lower()
+    normalized["time_pressure"] = str(decision.get("time_pressure", "")).strip().lower() or None
+    normalized["recent_pnl_state"] = str(decision.get("recent_pnl_state", "")).strip().lower() or None
+    pos = decision.get("position_context") or {}
+    normalized["position_context"] = {
+        "current_position_pct": round(float(pos.get("current_position_pct", 0) or 0), 6),
+        "sector_exposure_pct": round(float(pos.get("sector_exposure_pct", 0) or 0), 6),
+        "cash_available_pct": round(float(pos.get("cash_available_pct", 0) or 0), 6),
+    }
+    normalized["manual_notes"] = sorted(decision.get("manual_notes", []) or [])
+    return normalized
+
+
 def compute_decision_journal_source_hash(decision: dict[str, Any], as_of_date: str, memory_pack: dict[str, Any] | None) -> str:
     canonical = {
         "schema_version": P41_SCHEMA_VERSION,
         "as_of_date": as_of_date,
-        "decision": decision,
+        "decision": _normalize_decision_for_hash(decision),
         "memory_pack_id": (memory_pack or {}).get("pack_id", ""),
         "memory_source_hash": (memory_pack or {}).get("source_hash", ""),
     }
@@ -105,13 +138,15 @@ def build_guardrail_flags(decision: dict[str, Any], memory_pack: dict[str, Any] 
             missing_context.append(item)
             flags.append(_flag(item, SEVERITY_CAUTION, f"Memory pack missing context: {item}"))
         risk_memory = set(memory_pack.get("risk_memory", []))
+        recurring_themes = set(memory_pack.get("recurring_themes", []))
+        combined_memory = risk_memory | recurring_themes
         if "quality_red_flags_present" in risk_memory:
             flags.append(_flag("quality_red_flags_present", SEVERITY_MANUAL_REVIEW, "P40 memory includes quality red flags."))
-        if "negative_outcome_history" in risk_memory:
+        if "negative_outcome_history" in combined_memory:
             flags.append(_flag("negative_outcome_memory", SEVERITY_SLOW_DOWN, "P40 memory includes negative outcome history."))
         if "prior_insufficient_outcome_data" in risk_memory:
             flags.append(_flag("insufficient_outcome_memory", SEVERITY_CAUTION, "Prior outcome data is insufficient."))
-        if "stale_research_context" in memory_pack.get("recurring_themes", []):
+        if "stale_research_context" in combined_memory:
             flags.append(_flag("stale_research_memory", SEVERITY_SLOW_DOWN, "P40 memory indicates stale research context."))
     return flags, sorted(set(missing_context))
 
@@ -230,9 +265,7 @@ def run_decision_journal_guardrails(
             continue
         errors = validate_decision_item(item)
         if errors:
-            warnings.extend(errors)
-            if "forbidden_contemplated_action" in errors or "invalid_contemplated_action" in errors:
-                return {"status": P41_STATUS_BLOCKED_INVALID_INPUT, "entry_count": 0, "warnings": errors}
+            return {"status": P41_STATUS_BLOCKED_INVALID_INPUT, "entry_count": 0, "warnings": errors}
         ticker = _normalize_ticker(item.get("ticker", ""))
         try:
             memory_pack = db.get_latest_research_memory_pack(ticker, effective_as_of)

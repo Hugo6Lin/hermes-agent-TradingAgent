@@ -216,3 +216,39 @@ def test_p41_hard_boundaries_are_explicit():
     }
     assert not (forbidden_names & set(p41.__dict__))
     assert "behavioral guardrail evidence only" in p41.P41_ARTIFACT_DISCLAIMER
+
+
+# ── Audit fix regression tests ───────────────────────────────────────────
+
+def test_invalid_decision_intent_is_blocked():
+    errors = validate_decision_item(_decision(decision_intent="yolo"))
+    assert "invalid_decision_intent" in errors
+
+
+def test_missing_stated_reason_blocks_at_runtime(tmp_path: Path):
+    db = _db(tmp_path)
+    bad_decision = _decision()
+    del bad_decision["stated_reason"]
+    payload = {"as_of_date": "2026-04-30", "source": "fixture", "decisions": [bad_decision]}
+    result = run_decision_journal_guardrails(db, payload, as_of_date="2026-04-30", output_root=tmp_path / "output")
+    assert result["status"] == "blocked_invalid_input"
+
+
+def test_negative_outcome_in_recurring_themes_triggers_guardrail():
+    memory = {"pack_id": "p1", "source_hash": "h1", "risk_memory": [], "missing_context": [], "recurring_themes": ["negative_outcome_history"]}
+    entry = build_decision_journal_entry(_decision(urgency="low", boss_confidence=0.5), "2026-04-30", memory)
+    flags = {f["flag_id"] for f in entry["guardrail_flags"]}
+    assert "negative_outcome_memory" in flags
+
+
+def test_stale_research_in_risk_memory_triggers_guardrail():
+    memory = {"pack_id": "p1", "source_hash": "h1", "risk_memory": ["stale_research_context"], "missing_context": [], "recurring_themes": []}
+    entry = build_decision_journal_entry(_decision(urgency="low", boss_confidence=0.5), "2026-04-30", memory)
+    flags = {f["flag_id"] for f in entry["guardrail_flags"]}
+    assert "stale_research_memory" in flags
+
+
+def test_cosmetic_ticker_difference_does_not_change_source_hash():
+    first = build_decision_journal_entry(_decision(ticker=" aapl "), "2026-04-30", None)
+    second = build_decision_journal_entry(_decision(ticker="AAPL"), "2026-04-30", None)
+    assert first["source_hash"] == second["source_hash"]
