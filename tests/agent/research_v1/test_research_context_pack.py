@@ -228,3 +228,25 @@ def test_system_context_reads_p42_p43_from_db_without_artifact(tmp_path: Path):
     )
     assert pack["system_context"].get("latest_boss_brief_status") == "brief_ready"
     assert pack["system_context"].get("latest_console_index_status") == "index_ready"
+
+
+def test_db_call_warning_captured_on_operational_error(tmp_path: Path):
+    import sqlite3
+
+    db = ResearchDatabase(str(tmp_path / "test.db"))
+    db.initialize()
+    governance_root = tmp_path / "governance"
+    governance_root.mkdir()
+
+    def broken_method(*args, **kwargs):
+        raise sqlite3.OperationalError("no such table: fake_table")
+
+    db.list_market_data_readiness_reports_as_of = broken_method
+    pack = run_research_context_pack(
+        db=db,
+        governance_root=governance_root,
+        output_root=tmp_path / "output",
+        as_of_date="2026-05-01",
+        tickers=["AAPL"],
+    )
+    assert any("db_call_failed" in w for w in pack["warnings"])

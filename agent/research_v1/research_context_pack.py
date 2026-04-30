@@ -131,6 +131,7 @@ def build_research_context_pack(
     missing_context: list[str] = []
     warnings: list[str] = []
     source_refs = list(system_context.get("source_refs", []))
+    warnings.extend(system_context.get("warnings", []))
     for ctx in ticker_contexts:
         missing_context.extend(ctx["missing_context"])
         warnings.extend(ctx["warnings"])
@@ -238,11 +239,14 @@ def _load_artifact_as_of(governance_root: Path, as_of_date: str, lookback_days: 
     return None
 
 
-def _safe_db_call(method, *args, **kwargs) -> list[dict]:
+def _safe_db_call(method, *args, _warnings: list[str] | None = None, **kwargs) -> list[dict]:
     """Call a DB method, returning [] if the table doesn't exist."""
+    import sqlite3
     try:
         return method(*args, **kwargs)
-    except Exception:
+    except sqlite3.OperationalError as exc:
+        if _warnings is not None:
+            _warnings.append(f"db_call_failed:{method.__name__}:{exc}")
         return []
 
 
@@ -254,6 +258,7 @@ def collect_research_context_evidence(
     lookback_days: int,
 ) -> dict[str, Any]:
     """Collect P36-P46 evidence for context pack assembly."""
+    _warns: list[str] = []
     evidence: dict[str, Any] = {"system": {}, "tickers": {ticker: {} for ticker in tickers}}
 
     # System context: prefer DB rows at or before as_of_date, fall back to JSON artifacts
@@ -269,7 +274,7 @@ def collect_research_context_evidence(
         populated = False
         method = getattr(db, method_name, None)
         if method:
-            rows = _safe_db_call(method, as_of_date)
+            rows = _safe_db_call(method, as_of_date, _warnings=_warns)
             if rows:
                 row = rows[0]
                 evidence["system"][target_key] = row.get("status")
@@ -300,7 +305,7 @@ def collect_research_context_evidence(
     regime_method = getattr(db, "list_market_regime_snapshots_as_of", None)
     regime_snapshot = None
     if regime_method:
-        rows = _safe_db_call(regime_method, as_of_date)
+        rows = _safe_db_call(regime_method, as_of_date, _warnings=_warns)
         if rows:
             regime_snapshot = rows[0]
     if not regime_snapshot:
@@ -327,7 +332,7 @@ def collect_research_context_evidence(
         # Fundamental quality (P38 - per ticker)
         quality_method = getattr(db, "list_fundamental_quality_reports_as_of", None)
         if quality_method:
-            rows = _safe_db_call(quality_method, ticker, as_of_date)
+            rows = _safe_db_call(quality_method, ticker, as_of_date, _warnings=_warns)
             if rows:
                 row = rows[0]
                 tctx["fundamental_quality"] = {
@@ -347,7 +352,7 @@ def collect_research_context_evidence(
         # Candidate pool (P39 - per ticker)
         candidate_method = getattr(db, "list_candidate_pool_items_for_ticker", None)
         if candidate_method:
-            rows = _safe_db_call(candidate_method, ticker, as_of_date, lookback_days, limit=3)
+            rows = _safe_db_call(candidate_method, ticker, as_of_date, lookback_days, limit=3, _warnings=_warns)
             if rows:
                 row = rows[0]
                 tctx["candidate_context"] = {
@@ -367,7 +372,7 @@ def collect_research_context_evidence(
         # Outcome context (P36 - per ticker)
         outcome_method = getattr(db, "list_canonical_outcomes_for_ticker", None)
         if outcome_method:
-            rows = _safe_db_call(outcome_method, ticker, as_of_date, lookback_days, limit=3)
+            rows = _safe_db_call(outcome_method, ticker, as_of_date, lookback_days, limit=3, _warnings=_warns)
             if rows:
                 row = rows[0]
                 tctx["outcome_context"] = {
@@ -387,7 +392,7 @@ def collect_research_context_evidence(
         # Memory context (P40 - per ticker)
         memory_method = getattr(db, "list_research_memory_packs_as_of", None)
         if memory_method:
-            rows = _safe_db_call(memory_method, ticker, as_of_date)
+            rows = _safe_db_call(memory_method, ticker, as_of_date, _warnings=_warns)
             if rows:
                 row = rows[0]
                 tctx["memory_context"] = {
@@ -406,7 +411,7 @@ def collect_research_context_evidence(
         # Decision guardrails (P41 - per ticker)
         journal_method = getattr(db, "list_decision_journal_entries_as_of", None)
         if journal_method:
-            rows = _safe_db_call(journal_method, ticker, as_of_date)
+            rows = _safe_db_call(journal_method, ticker, as_of_date, _warnings=_warns)
             if rows:
                 row = rows[0]
                 tctx["decision_guardrails"] = {
@@ -422,6 +427,8 @@ def collect_research_context_evidence(
                     "source_hash": row.get("source_hash"),
                 })
 
+    if _warns:
+        evidence["system"]["warnings"] = sorted(set(_warns))
     return evidence
 
 
