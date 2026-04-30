@@ -755,3 +755,49 @@ def test_decision_journal_run_cli_rejects_missing_file(tmp_path, capsys):
 
     assert code == 2
     assert "file not found" in capsys.readouterr().out
+
+
+# ── P42 boss-copilot-brief-run CLI tests ────────────────────────────────
+
+def test_boss_copilot_brief_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "brief_ready",
+            "output_dir": str(output_dir),
+            "priority_count": 2,
+            "high_priority_count": 1,
+            "manual_review_count": 0,
+            "missing_context_count": 0,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_copilot_daily_brief", fake_run)
+    code = main(["--app-root", str(app_root), "boss-copilot-brief-run", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Boss co-pilot brief status: brief_ready" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_boss_copilot_brief_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "boss-copilot-brief-run", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid boss-copilot-brief-run input" in capsys.readouterr().out
+
+
+def test_boss_copilot_brief_run_cli_rejects_non_positive_max_priorities(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "boss-copilot-brief-run", "--as-of-date", "2026-04-30", "--max-priorities", "0"])
+
+    assert code == 2
+    assert "max-priorities must be positive" in capsys.readouterr().out
