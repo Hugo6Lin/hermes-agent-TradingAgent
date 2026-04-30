@@ -125,6 +125,10 @@ context rather than hidden.
 
 `evidence_refresh_planner.py` consumes the latest P44 freshness/drift monitor and P45 market-data readiness report, then writes a dry-run refresh plan under `output/governance/YYYY-MM-DD/`. The flow is one-way: P46 does not refresh evidence, call market-data providers, invoke P36-P45 runtimes, or mutate research decisions.
 
+#### P47 Research Context Pack
+
+`research_context_pack.py` reads persisted P36-P46 evidence and governance artifacts, then assembles a read-only research context pack for one or more tickers. The flow is one-way: P47 does not call `HermesResearchApp.run()`, `final_judge`, P36-P46 runtimes, market-data providers, or broker/order APIs. It does not inject context into research prompts or judge prompts in v1.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 

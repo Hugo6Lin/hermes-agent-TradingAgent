@@ -648,6 +648,27 @@ Example:
 P46 does not refresh evidence, call market-data providers, schedule jobs, or
 mutate prior evidence. It only produces a manual plan.
 
+### P47 Research Context Pack
+
+P47 aggregates P36-P46 evidence into a read-only research context pack for
+one or more tickers. It does not inject context into research prompts, call
+research runtimes, or mutate prior evidence:
+
+```text
+output/governance/YYYY-MM-DD/p47_research_context_pack.json
+output/governance/YYYY-MM-DD/p47_research_context_pack.md
+```
+
+Example:
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli research-context-pack-run \
+  --as-of-date 2026-05-01 \
+  --tickers AAPL,MSFT,NVDA \
+  --lookback-days 180 \
+  --max-items-per-ticker 8
+```
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -794,6 +815,14 @@ HERMES_LIVE_FUTU=1 /opt/homebrew/bin/python3.11 -m pytest \
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
   tests/agent/research_v1/test_evidence_refresh_planner.py \
+  -q
+```
+
+### P47 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_research_context_pack.py \
   -q
 ```
 
