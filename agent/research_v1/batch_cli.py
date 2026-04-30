@@ -95,11 +95,14 @@ def _cmd_governance_run(
     output_root: str,
     freshness_policy_days: int,
 ) -> int:
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
     result = run_governance_runtime(
         GovernanceRuntimeRequest(
             run_date=run_date,
             repo_root=paths.app_root,
-            output_root=Path(output_root).expanduser().resolve(),
+            output_root=output_path.resolve(),
             config_path=Path(config_path).expanduser().resolve(),
             freshness_policy_days=freshness_policy_days,
         )

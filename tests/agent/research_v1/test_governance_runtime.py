@@ -136,3 +136,60 @@ def test_runtime_preserves_dry_run_boundary(tmp_path: Path):
         "missing_required_input:liquidity_inputs",
         "missing_required_input:alpha_edge_estimate",
     ]
+
+
+def test_runtime_blocks_version_when_configured_checks_fail(tmp_path: Path):
+    config_path = tmp_path / "governance_config.json"
+    payload = {
+        "version_readiness": {
+            "version_id": "p35-local",
+            "branch": "codex/quant-governance-p20-p30",
+            "commit": "local-test",
+            "evidence": {
+                "p20_p30_regression_passed": True,
+                "p31_p34_regression_passed": False,
+                "doc_standards_passed": False,
+            },
+            "notes": "P35 blocked test",
+        },
+        "signal_families": [],
+        "expected_artifacts": [],
+        "generation_requests": [],
+        "edge_reviews": [],
+    }
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = run_governance_runtime(
+        GovernanceRuntimeRequest(
+            run_date="2026-04-30",
+            repo_root=tmp_path,
+            output_root=tmp_path / "output" / "governance",
+            config_path=config_path,
+            freshness_policy_days=7,
+        )
+    )
+
+    daily_summary_path = tmp_path / "output" / "governance" / "2026-04-30" / "daily_summary.json"
+    summary = json.loads(daily_summary_path.read_text(encoding="utf-8"))
+    assert summary["version_status"] == "blocked_test_failures"
+    assert result.boss_brief_status != "ready_for_human_review"
+
+
+def test_runtime_returns_degraded_on_write_failure(tmp_path: Path):
+    config_path = _write_valid_config(tmp_path / "governance_config.json")
+    output_root = tmp_path / "output" / "governance"
+    output_root.mkdir(parents=True)
+    (output_root / "2026-04-30").write_text("block directory creation", encoding="utf-8")
+
+    result = run_governance_runtime(
+        GovernanceRuntimeRequest(
+            run_date="2026-04-30",
+            repo_root=tmp_path,
+            output_root=output_root,
+            config_path=config_path,
+            freshness_policy_days=7,
+        )
+    )
+
+    assert result.status == "governance_degraded"
+    assert "write_failure" in result.warnings[0]

@@ -110,23 +110,23 @@ def _version_request(config: dict[str, Any]) -> VersionReadinessRequest:
         test_evidence=(
             TestEvidence(
                 command="P20-P30 configured regression",
-                status="passed" if p20_p30_passed else "not_run",
+                status="passed" if p20_p30_passed else "failed",
                 passed_count=488 if p20_p30_passed else 0,
-                failed_count=0,
+                failed_count=0 if p20_p30_passed else 1,
                 raw_summary="configured by P35 runtime",
             ),
             TestEvidence(
                 command="P31-P34 configured regression",
-                status="passed" if p31_p34_passed else "not_run",
+                status="passed" if p31_p34_passed else "failed",
                 passed_count=55 if p31_p34_passed else 0,
-                failed_count=0,
+                failed_count=0 if p31_p34_passed else 1,
                 raw_summary="configured by P35 runtime",
             ),
             TestEvidence(
                 command="doc standards configured check",
-                status="passed" if doc_passed else "not_run",
+                status="passed" if doc_passed else "failed",
                 passed_count=1 if doc_passed else 0,
-                failed_count=0,
+                failed_count=0 if doc_passed else 1,
                 raw_summary="configured by P35 runtime",
             ),
         ),
@@ -224,10 +224,29 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _empty_result(request: GovernanceRuntimeRequest, status: str, warning: str) -> GovernanceRuntimeResult:
+    output_dir = request.output_root / request.run_date
+    return GovernanceRuntimeResult(
+        status=status,
+        run_date=request.run_date,
+        output_dir=str(output_dir),
+        daily_governance_status="not_run",
+        registry_status="not_run",
+        generation_status="not_run",
+        boss_brief_status="not_run",
+        artifacts_written=(),
+        warnings=(warning,),
+    )
+
+
 def run_governance_runtime(request: GovernanceRuntimeRequest) -> GovernanceRuntimeResult:
     output_dir = request.output_root / request.run_date
     try:
         config = _load_config(request.config_path)
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        return _empty_result(request, "blocked_invalid_config", f"invalid_config:{exc.__class__.__name__}")
+
+    try:
         daily = run_daily_governance(
             DailyGovernanceRequest(
                 run_date=request.run_date,
@@ -288,9 +307,9 @@ def run_governance_runtime(request: GovernanceRuntimeRequest) -> GovernanceRunti
         )
         _write_json(output_dir / "governance_runtime_summary.json", result.to_dict())
         return result
-    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+    except OSError as exc:
         return GovernanceRuntimeResult(
-            status="blocked_invalid_config",
+            status="governance_degraded",
             run_date=request.run_date,
             output_dir=str(output_dir),
             daily_governance_status="not_run",
@@ -298,5 +317,5 @@ def run_governance_runtime(request: GovernanceRuntimeRequest) -> GovernanceRunti
             generation_status="not_run",
             boss_brief_status="not_run",
             artifacts_written=(),
-            warnings=(f"invalid_config:{exc.__class__.__name__}",),
+            warnings=(f"write_failure:{exc.__class__.__name__}",),
         )
