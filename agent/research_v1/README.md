@@ -117,6 +117,10 @@ context rather than hidden.
 
 `evidence_freshness_drift_monitor.py` reads persisted P36-P43 evidence and governance artifacts, then emits a deterministic evidence-health report. The flow is one-way: P44 does not invoke P36-P43 runtimes, `HermesResearchApp.run()`, `final_judge`, or broker/order APIs.
 
+#### P45 Futu Market Data Readiness
+
+`market_data_readiness.py` checks whether the Futu SDK is installed, whether OpenD is reachable, and optionally verifies live snapshot/history/option-chain calls. It writes readiness artifacts under `output/governance/YYYY-MM-DD/`. The flow is one-way: P45 does not place orders, unlock trading, use trade contexts, query positions, invoke P36-P44 runtimes, or mutate research decisions.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 

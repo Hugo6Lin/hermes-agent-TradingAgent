@@ -52,8 +52,10 @@ class MarketDataProvider(ABC):
 
 - `agent/research_v1/market_data_service.py` — uses providers
 - `agent/research_v1/subagent_executor.py` — uses MarketDataService
+- `agent/research_v1/market_data_readiness.py` — P45 readiness checks (uses `FutuQuoteClient` via `FutuReadinessProvider`)
 - `tests/agent/research_v1/test_market_data_service.py` — provider tests
 - `tests/agent/research_v1/test_futu_provider.py` — Futu-specific tests
+- `tests/agent/research_v1/test_market_data_readiness.py` — P45 readiness tests
 
 ## Related Files
 

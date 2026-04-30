@@ -599,6 +599,33 @@ P44 is evidence monitoring only. It does not refresh evidence, schedule jobs,
 send notifications, run prior phases, recommend trades, or mutate research
 decisions.
 
+### P45 Futu Market Data Readiness
+
+P45 is a read-only Futu OpenD readiness gate. It checks whether the `futu-api`
+SDK is installed, whether OpenD is reachable, and optionally verifies live
+snapshot/history/option-chain calls. It writes `p45_market_data_readiness.json`
+and `.md` under `output/governance/YYYY-MM-DD/`.
+
+P45 is not a trading integration. It does not place orders, unlock trading,
+use trade contexts, query positions, approve production adoption, train models,
+schedule jobs, or mutate research decisions.
+
+CLI usage:
+
+```bash
+python -m agent.research_v1.batch_cli market-data-readiness-run \
+  --as-of-date 2026-04-30 \
+  --symbols US.AAPL,HK.00700 \
+  --history-days 30 \
+  --option-symbol US.AAPL \
+  --live \
+  --output-root output/governance
+```
+
+Futu OpenD must be running locally (default `127.0.0.1:11111`). The Python
+runtime must have `futu-api>=10.4.6408` installed. Host and port can be
+overridden via `FUTU_OPEND_HOST` and `FUTU_OPEND_PORT` environment variables.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -724,6 +751,22 @@ Use Python 3.11:
   -q
 ```
 
+### P45 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_market_data_readiness.py \
+  -q
+```
+
+Optional live smoke test (requires running OpenD + installed futu-api):
+
+```bash
+HERMES_LIVE_FUTU=1 /opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_futu_live_smoke.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -797,6 +840,7 @@ Recent result:
   tests/agent/research_v1/test_boss_copilot_daily_brief.py \
   tests/agent/research_v1/test_copilot_console_index.py \
   tests/agent/research_v1/test_evidence_freshness_drift_monitor.py \
+  tests/agent/research_v1/test_market_data_readiness.py \
   -q
 ```
 
