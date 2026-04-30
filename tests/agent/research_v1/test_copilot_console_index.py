@@ -164,6 +164,80 @@ def test_disclaimer_contains_required_phrase():
     assert "static read-only evidence index" in P43_ARTIFACT_DISCLAIMER
 
 
+def test_source_hash_changes_when_same_length_markdown_content_changes(tmp_path: Path):
+    import os
+    root = tmp_path / "governance"
+    day = _day(root, "2026-04-30")
+    _write(day / "p42_boss_copilot_daily_brief.json", {"schema_version": "p42", "source_hash": "h42"})
+    md_path = day / "p42_boss_copilot_daily_brief.md"
+    md_path.write_text("Alpha content here!", encoding="utf-8")
+    mtime = md_path.stat().st_mtime_ns
+    first = build_copilot_console_index(root, "2026-04-30", lookback_days=14)
+    md_path.write_text("Bravo content here!", encoding="utf-8")
+    os.utime(md_path, ns=(mtime, mtime))
+    second = build_copilot_console_index(root, "2026-04-30", lookback_days=14)
+
+    assert first["source_hash"] != second["source_hash"]
+
+
+def test_non_directory_governance_root_returns_blocked(tmp_path: Path):
+    file_root = tmp_path / "governance"
+    file_root.write_text("not a directory", encoding="utf-8")
+
+    index = build_copilot_console_index(file_root, "2026-04-30", lookback_days=14)
+
+    assert index["status"] == "blocked_invalid_input"
+    assert "governance_root_not_a_directory" in index["warnings"]
+
+
+def test_invalid_json_warning_appears_in_markdown(tmp_path: Path):
+    from agent.research_v1.copilot_console_index import _markdown
+    root = tmp_path / "governance"
+    day = _day(root, "2026-04-30")
+    (day / "p42_boss_copilot_daily_brief.json").write_text("{bad json", encoding="utf-8")
+    index = build_copilot_console_index(root, "2026-04-30", lookback_days=14)
+    md = _markdown(index)
+
+    assert "invalid_json:p42_boss_copilot_daily_brief.json" in md
+
+
+def test_invalid_json_warning_appears_in_html(tmp_path: Path):
+    from agent.research_v1.copilot_console_index import _html
+    root = tmp_path / "governance"
+    day = _day(root, "2026-04-30")
+    (day / "p42_boss_copilot_daily_brief.json").write_text("{bad json", encoding="utf-8")
+    index = build_copilot_console_index(root, "2026-04-30", lookback_days=14)
+    doc = _html(index)
+
+    assert "invalid_json:p42_boss_copilot_daily_brief.json" in doc
+
+
+def test_non_primary_artifact_links_appear_in_markdown(tmp_path: Path):
+    from agent.research_v1.copilot_console_index import _markdown
+    root = tmp_path / "governance"
+    day = _day(root, "2026-04-30")
+    _write(day / "p36_recommendation_outcomes.json", {"schema_version": "p36"})
+    _write(day / "p42_boss_copilot_daily_brief.json", {"schema_version": "p42"})
+    (day / "p42_boss_copilot_daily_brief.md").write_text("# P42", encoding="utf-8")
+    index = build_copilot_console_index(root, "2026-04-30", lookback_days=14)
+    md = _markdown(index)
+
+    assert "p36_recommendation_outcomes.json" in md
+
+
+def test_non_primary_artifact_links_appear_in_html(tmp_path: Path):
+    from agent.research_v1.copilot_console_index import _html
+    root = tmp_path / "governance"
+    day = _day(root, "2026-04-30")
+    _write(day / "p36_recommendation_outcomes.json", {"schema_version": "p36"})
+    _write(day / "p42_boss_copilot_daily_brief.json", {"schema_version": "p42"})
+    (day / "p42_boss_copilot_daily_brief.md").write_text("# P42", encoding="utf-8")
+    index = build_copilot_console_index(root, "2026-04-30", lookback_days=14)
+    doc = _html(index)
+
+    assert "p36_recommendation_outcomes.json" in doc
+
+
 # ── P43-B persistence tests ─────────────────────────────────────────────
 
 from agent.research_v1.data.database import ResearchDatabase

@@ -119,7 +119,12 @@ def _artifact_fingerprint(day_dir: Path, names: list[str]) -> list[dict[str, Any
         if not path.exists():
             continue
         stat = path.stat()
-        rows.append({"name": name, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns})
+        try:
+            content = path.read_bytes()
+            content_hash = hashlib.sha256(content).hexdigest()
+        except OSError:
+            content_hash = ""
+        rows.append({"name": name, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "content_hash": content_hash})
     return rows
 
 
@@ -131,6 +136,9 @@ def build_copilot_console_index(governance_root: Path, as_of_date: str, lookback
         window = _date_window(as_of_date, lookback_days)
     except ValueError:
         return {"schema_version": P43_SCHEMA_VERSION, "status": P43_STATUS_BLOCKED_INVALID_INPUT, "warnings": ["invalid_date_format"]}
+
+    if governance_root.exists() and not governance_root.is_dir():
+        return {"schema_version": P43_SCHEMA_VERSION, "status": P43_STATUS_BLOCKED_INVALID_INPUT, "warnings": ["governance_root_not_a_directory"]}
 
     day_dirs = []
     if governance_root.exists() and governance_root.is_dir():
@@ -196,11 +204,22 @@ def _markdown(index: dict[str, Any]) -> str:
         f"Status: `{index.get('status', '')}`",
         f"Day count: `{index.get('summary', {}).get('day_count', 0)}`",
         "",
-        "## Daily Coverage",
+        "## Latest Boss Co-Pilot Brief",
         "",
-        "| Date | Coverage | Primary Brief | Missing | Invalid |",
-        "|------|----------|---------------|---------|---------|",
     ]
+    latest_brief = ""
+    for day in index.get("days", []):
+        ref = day.get("primary_brief_ref")
+        if ref:
+            latest_brief = ref
+            break
+    if latest_brief:
+        lines.append(f"- [{latest_brief}]({latest_brief})")
+    else:
+        lines.append("- none available")
+    lines.extend(["", "## Daily Coverage", ""])
+    lines.append("| Date | Coverage | Primary Brief | Missing | Invalid |")
+    lines.append("|------|----------|---------------|---------|---------|")
     for day in index.get("days", []):
         primary = day.get("primary_brief_ref") or ""
         primary_link = f"[open]({primary})" if primary else ""
@@ -215,6 +234,26 @@ def _markdown(index: dict[str, Any]) -> str:
             any_missing = True
             lines.append(f"- {day['date']}: {', '.join(day['missing_artifacts'])}")
     if not any_missing:
+        lines.append("- none")
+    lines.extend(["", "## Invalid JSON Warnings", ""])
+    any_invalid = False
+    for day in index.get("days", []):
+        for warning in day.get("warnings", []):
+            if warning.startswith("invalid_json:"):
+                any_invalid = True
+                lines.append(f"- {day['date']}: {warning}")
+    if not any_invalid:
+        lines.append("- none")
+    lines.extend(["", "## Artifact Links", ""])
+    any_links = False
+    for day in index.get("days", []):
+        for name, link in sorted(day.get("json_links", {}).items()):
+            any_links = True
+            lines.append(f"- {day['date']}: [{name}]({link})")
+        for name, link in sorted(day.get("markdown_links", {}).items()):
+            any_links = True
+            lines.append(f"- {day['date']}: [{name}]({link})")
+    if not any_links:
         lines.append("- none")
     lines.extend(["", "---", "", f"> {index.get('disclaimer', P43_ARTIFACT_DISCLAIMER)}", ""])
     text = "\n".join(lines)
@@ -236,6 +275,30 @@ def _html(index: dict[str, Any]) -> str:
             f"<td>{len(day['warnings'])}</td>"
             "</tr>"
         )
+    latest_brief_html = ""
+    for day in index.get("days", []):
+        ref = day.get("primary_brief_ref")
+        if ref:
+            escaped = html.escape(ref)
+            latest_brief_html = f'<a href="{escaped}">{escaped}</a>'
+            break
+    if not latest_brief_html:
+        latest_brief_html = "none available"
+    invalid_items = []
+    for day in index.get("days", []):
+        for warning in day.get("warnings", []):
+            if warning.startswith("invalid_json:"):
+                invalid_items.append(f"{day['date']}: {html.escape(warning)}")
+    invalid_html = "<ul>" + "".join(f"<li>{item}</li>" for item in invalid_items) + "</ul>" if invalid_items else "<p>none</p>"
+    link_items = []
+    for day in index.get("days", []):
+        for name, ref in sorted(day.get("json_links", {}).items()):
+            escaped_ref = html.escape(ref)
+            link_items.append(f'{day["date"]}: <a href="{escaped_ref}">{html.escape(name)}</a>')
+        for name, ref in sorted(day.get("markdown_links", {}).items()):
+            escaped_ref = html.escape(ref)
+            link_items.append(f'{day["date"]}: <a href="{escaped_ref}">{html.escape(name)}</a>')
+    links_html = "<ul>" + "".join(f"<li>{item}</li>" for item in link_items) + "</ul>" if link_items else "<p>none</p>"
     doc = f"""<!doctype html>
 <html>
 <head>
@@ -246,16 +309,33 @@ def _html(index: dict[str, Any]) -> str:
     table {{ border-collapse: collapse; width: 100%; }}
     th, td {{ border: 1px solid #d1d5db; padding: 8px; text-align: left; }}
     th {{ background: #f3f4f6; }}
+    section {{ margin-top: 24px; }}
+    h2 {{ font-size: 1.1em; }}
   </style>
 </head>
 <body>
   <h1>Hermes Co-Pilot Console Index</h1>
   <p>Status: <strong>{html.escape(index.get('status', ''))}</strong></p>
   <p>As of: {html.escape(index.get('as_of_date', ''))}</p>
-  <table>
-    <thead><tr><th>Date</th><th>Coverage</th><th>Primary Brief</th><th>Missing</th><th>Invalid</th></tr></thead>
-    <tbody>{''.join(rows)}</tbody>
-  </table>
+  <section>
+    <h2>Latest Boss Co-Pilot Brief</h2>
+    <p>{latest_brief_html}</p>
+  </section>
+  <section>
+    <h2>Daily Coverage</h2>
+    <table>
+      <thead><tr><th>Date</th><th>Coverage</th><th>Primary Brief</th><th>Missing</th><th>Invalid</th></tr></thead>
+      <tbody>{''.join(rows)}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Invalid JSON Warnings</h2>
+    {invalid_html}
+  </section>
+  <section>
+    <h2>Artifact Links</h2>
+    {links_html}
+  </section>
   <p>{html.escape(index.get('disclaimer', P43_ARTIFACT_DISCLAIMER))}</p>
 </body>
 </html>"""
