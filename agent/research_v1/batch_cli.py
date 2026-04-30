@@ -11,6 +11,7 @@ from typing import Sequence
 from agent.research_v1.data.database import ResearchDatabase
 from agent.research_v1.data.futu_opend import FutuQuoteClient
 from agent.research_v1.governance_runtime import GovernanceRuntimeRequest, run_governance_runtime
+from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
 from agent.research_v1.report_pdf_legacy import export_batch_pdf
@@ -157,6 +158,43 @@ def _cmd_outcome_run(
     return 0
 
 
+def _cmd_market_regime_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    lookback_days: int,
+    output_root: str,
+) -> int:
+    try:
+        run_date = date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid market-regime-run input: invalid date format '{as_of_date}'")
+        return 2
+
+    if lookback_days <= 0:
+        print("invalid market-regime-run input: lookback-days must be positive")
+        return 2
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_market_regime_context(
+        db=database,
+        as_of_date=run_date,
+        lookback_days=lookback_days,
+        output_root=output_path.resolve(),
+    )
+    print(f"Market regime status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Regime label: {result['regime_label']}")
+    print(f"Confidence: {result['confidence']}")
+    print(f"Missing symbols: {len(result['missing_symbols'])}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -222,6 +260,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Flat round-trip cost in basis points.",
     )
 
+    regime_parser = subparsers.add_parser("market-regime-run", help="Run market regime context snapshot.")
+    regime_parser.add_argument("--as-of-date", required=True, help="Snapshot as-of date YYYY-MM-DD.")
+    regime_parser.add_argument(
+        "--lookback-days",
+        default=90,
+        type=int,
+        help="Lookback window in days for proxy history.",
+    )
+    regime_parser.add_argument(
+        "--output-root",
+        default="output/governance",
+        help="Root directory for regime artifacts.",
+    )
+
     return parser
 
 
@@ -259,6 +311,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_root=args.output_root,
             limit=args.limit,
             flat_cost_bps=args.flat_cost_bps,
+        )
+    if args.command == "market-regime-run":
+        return _cmd_market_regime_run(
+            paths,
+            as_of_date=args.as_of_date,
+            lookback_days=args.lookback_days,
+            output_root=args.output_root,
         )
 
     parser.print_help()

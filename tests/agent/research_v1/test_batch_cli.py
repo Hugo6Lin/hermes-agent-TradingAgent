@@ -372,3 +372,58 @@ def test_outcome_run_cli_rejects_negative_limit(tmp_path, capsys):
 
     assert code == 2
     assert "invalid outcome-run input" in capsys.readouterr().out
+
+
+# ── P37 market-regime-run CLI tests ──────────────────────────────────────────
+
+def test_market_regime_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "p37_market_regime_snapshot.json").write_text("{}", encoding="utf-8")
+        (output_dir / "p37_market_regime_snapshot.md").write_text("# P37", encoding="utf-8")
+        return {
+            "status": "completed",
+            "output_dir": str(output_dir),
+            "regime_label": "risk_on_broad",
+            "confidence": 0.82,
+            "missing_symbols": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_regime_context", fake_run)
+
+    code = main([
+        "--app-root", str(app_root),
+        "market-regime-run",
+        "--as-of-date", "2026-04-30",
+        "--lookback-days", "90",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Market regime status: completed" in out
+    assert "risk_on_broad" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_market_regime_run_cli_rejects_invalid_inputs(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    code = main([
+        "--app-root", str(app_root),
+        "market-regime-run",
+        "--as-of-date", "bad-date",
+        "--lookback-days", "-1",
+    ])
+
+    assert code == 2
+    assert "invalid market-regime-run input" in capsys.readouterr().out
