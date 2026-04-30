@@ -420,6 +420,37 @@ def test_run_outcome_tracking_uses_injected_provider(tmp_path: Path):
     assert result["evaluated_count"] > 0
 
 
+def test_default_provider_fetches_market_data_when_none_injected(tmp_path: Path, monkeypatch):
+    """P1-2b: When no provider is injected, run_recommendation_outcome_tracking
+    must use a real FutuQuoteClient-backed provider, not the empty _DbProvider."""
+    db = _db(tmp_path)
+    task = _task()
+    signal = _signal()
+    db.save_research_task(task)
+    db.save_canonical_signal(signal, task.task_id)
+    _seed_report_with_decision_card(db, primary_action="Buy Stock")
+
+    fetch_calls = []
+
+    def fake_fetch_history(self, symbol, start_date, end_date):
+        fetch_calls.append((symbol, start_date, end_date))
+        return _rows()
+
+    monkeypatch.setattr(
+        "agent.research_v1.data.futu_opend.FutuQuoteClient.fetch_history",
+        fake_fetch_history,
+    )
+
+    result = run_recommendation_outcome_tracking(
+        db=db,
+        evaluated_for_date=date(2026, 4, 30),
+        limit=10,
+    )
+
+    assert len(fetch_calls) > 0, "Default provider must call FutuQuoteClient.fetch_history"
+    assert result["evaluated_count"] > 0
+
+
 def test_next_open_enters_after_signal_date():
     """P1-3: Entry must be the first trading row AFTER the signal date,
     not the signal day itself (which may have already closed)."""

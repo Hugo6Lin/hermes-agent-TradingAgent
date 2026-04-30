@@ -533,13 +533,14 @@ def run_recommendation_outcome_tracking(
         P36_STATUS_INVALID_SIGNAL: 0,
     }
     all_outcomes: list[dict] = []
+    default_provider = provider or _FutuProvider()
 
     for sig in signals:
         action = resolve_signal_action(db, sig["task_id"])
         if action is None:
             action = None
 
-        sig_provider = provider or _DbProvider(db, sig["ticker"])
+        sig_provider = default_provider
         outcomes = evaluate_recommendation_signal(
             signal=sig,
             action=action,
@@ -596,15 +597,21 @@ def run_recommendation_outcome_tracking(
     return result
 
 
-class _DbProvider:
-    def __init__(self, db: Any, ticker: str):
-        self._db = db
-        self._ticker = ticker
-        self.data_source = "canonical_db"
-        self.price_adjustment = PRICE_ADJUSTMENT_UNKNOWN
+class _FutuProvider:
+    """Default history provider backed by FutuQuoteClient."""
+
+    def __init__(self) -> None:
+        from agent.research_v1.data.futu_opend import FutuQuoteClient
+        self._client = FutuQuoteClient()
+        self.data_source = "futu_opend"
+        self.price_adjustment = PRICE_ADJUSTMENT_ADJUSTED
 
     def fetch_history(self, symbol: str, start_date: date, end_date: date) -> list[dict]:
-        return []
+        return self._client.fetch_history(
+            symbol=symbol,
+            start_date=str(start_date),
+            end_date=str(end_date),
+        )
 
 
 # ── Artifact Writer ──────────────────────────────────────────────────────────
