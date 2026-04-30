@@ -86,6 +86,13 @@ P36/P37/P38 evidence. It emits a candidate pool for human review. The flow
 is one-way: candidate-pool artifacts do not call `HermesResearchApp.run()`,
 `final_judge`, `_extract_thesis_inputs()`, or broker/order APIs.
 
+#### P40 Research Memory Pack
+
+`research_memory_pack.py` reads prior Hermes artifacts and DB rows for a
+ticker and emits a deterministic memory pack. The flow is one-way: memory
+packs do not call `HermesResearchApp.run()`, `final_judge`,
+`JudgeInputPacket`, or broker/order APIs.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 

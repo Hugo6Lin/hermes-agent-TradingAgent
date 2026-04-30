@@ -503,6 +503,32 @@ P39 is candidate-discovery evidence only. It does not call
 `CanonicalReport`, place orders, train models, schedule jobs, or mutate
 P36/P37/P38 evidence.
 
+### P40 Research Memory Pack
+
+```
+agent/research_v1/research_memory_pack.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli memory-pack-run \
+  --tickers AAPL,MSFT \
+  --as-of-date 2026-04-30 \
+  --lookback-days 180 \
+  --output-root output/governance
+```
+
+P40 builds deterministic ticker-level memory packs from prior Hermes
+research signals, reports, outcomes, candidate history, quality (P38),
+regime (P37), watchlist, and validation context. It writes
+`p40_research_memory_pack.{json,md}` under `output/governance/YYYY-MM-DD/`.
+
+P40 is research-memory evidence only. It does not call
+`HermesResearchApp.run()`, `final_judge`, create `CanonicalSignal` or
+`CanonicalReport`, place orders, train models, schedule jobs, or mutate
+P35-P39 evidence.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -588,6 +614,14 @@ Use Python 3.11:
   -q
 ```
 
+### P40 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_research_memory_pack.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -619,7 +653,7 @@ Recent result:
 60 passed
 ```
 
-### Full P20-P39 Governance Chain
+### Full P20-P40 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -656,6 +690,7 @@ Recent result:
   tests/agent/research_v1/test_market_regime_context.py \
   tests/agent/research_v1/test_fundamental_quality.py \
   tests/agent/research_v1/test_candidate_pool.py \
+  tests/agent/research_v1/test_research_memory_pack.py \
   -q
 ```
 
