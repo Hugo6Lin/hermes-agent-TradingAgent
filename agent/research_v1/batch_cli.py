@@ -12,6 +12,7 @@ from agent.research_v1.data.database import ResearchDatabase
 from agent.research_v1.data.futu_opend import FutuQuoteClient
 from agent.research_v1.governance_runtime import GovernanceRuntimeRequest, run_governance_runtime
 from agent.research_v1.fundamental_quality import run_fundamental_quality
+from agent.research_v1.candidate_pool import run_candidate_pool
 from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
@@ -254,6 +255,66 @@ def _cmd_fundamental_quality_run(
     return 0
 
 
+def _cmd_candidate_pool_run(
+    paths: HermesPaths,
+    input_path: str,
+    as_of_date: str | None,
+    output_root: str,
+    max_candidates: int,
+) -> int:
+    # Validate date format before proceeding
+    if as_of_date is not None:
+        try:
+            date.fromisoformat(as_of_date)
+        except (ValueError, TypeError):
+            print(f"invalid candidate-pool-run input: invalid date format '{as_of_date}'")
+            return 2
+
+    if max_candidates <= 0:
+        print("invalid candidate-pool-run input: max-candidates must be positive")
+        return 2
+
+    payload_path = Path(input_path).expanduser().resolve()
+    if not payload_path.exists():
+        print(f"invalid candidate-pool-run input: file not found '{input_path}'")
+        return 2
+
+    try:
+        input_payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, ValueError) as exc:
+        print(f"invalid candidate-pool-run input: {exc}")
+        return 2
+
+    if not isinstance(input_payload.get("tickers"), list):
+        print("invalid candidate-pool-run input: missing 'tickers' list")
+        return 2
+
+    for i, item in enumerate(input_payload["tickers"]):
+        if not isinstance(item, dict):
+            print(f"invalid candidate-pool-run input: ticker item {i} is not a dict")
+            return 2
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_candidate_pool(
+        db=database,
+        input_payload=input_payload,
+        as_of_date=as_of_date,
+        output_root=output_path.resolve(),
+        max_candidates=max_candidates,
+    )
+    print(f"Candidate pool status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Candidate count: {result['candidate_count']}")
+    print(f"Excluded count: {result['excluded_count']}")
+    print(f"Top candidate: {result['top_candidate'] or 'none'}")
+    print(f"Warning count: {result['warning_count']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -342,6 +403,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Root directory for fundamental quality artifacts.",
     )
 
+    candidate_parser = subparsers.add_parser("candidate-pool-run", help="Run candidate pool discovery.")
+    candidate_parser.add_argument("--input", required=True, help="Path to a JSON universe input file.")
+    candidate_parser.add_argument("--as-of-date", default=None, help="Override as-of date YYYY-MM-DD.")
+    candidate_parser.add_argument(
+        "--output-root",
+        default="output/governance",
+        help="Root directory for candidate pool artifacts.",
+    )
+    candidate_parser.add_argument(
+        "--max-candidates",
+        default=20,
+        type=int,
+        help="Maximum candidates to keep.",
+    )
+
     return parser
 
 
@@ -393,6 +469,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             input_path=args.input,
             as_of_date=args.as_of_date,
             output_root=args.output_root,
+        )
+    if args.command == "candidate-pool-run":
+        return _cmd_candidate_pool_run(
+            paths,
+            input_path=args.input,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+            max_candidates=args.max_candidates,
         )
 
     parser.print_help()

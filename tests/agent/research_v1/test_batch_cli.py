@@ -526,3 +526,109 @@ def test_fundamental_quality_run_cli_rejects_non_dict_ticker_item(tmp_path, caps
     out = capsys.readouterr().out
     assert "invalid fundamental-quality-run input" in out
     assert "ticker" in out.lower()
+
+
+# ── P39 candidate-pool-run CLI tests ─────────────────────────────────────────
+
+def test_candidate_pool_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "universe.json"
+    input_path.write_text(
+        '{"as_of_date":"2026-04-30","source":"fixture","universe_id":"u1","tickers":[]}',
+        encoding="utf-8",
+    )
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "no_candidates",
+            "output_dir": str(output_dir),
+            "candidate_count": 0,
+            "excluded_count": 0,
+            "top_candidate": "",
+            "warning_count": 0,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_candidate_pool", fake_run)
+
+    code = main([
+        "--app-root", str(app_root),
+        "candidate-pool-run",
+        "--input", str(input_path),
+        "--as-of-date", "2026-04-30",
+    ])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Candidate pool status: no_candidates" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_candidate_pool_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "universe.json"
+    input_path.write_text(
+        '{"as_of_date":"2026-04-30","source":"fixture","universe_id":"u1","tickers":[]}',
+        encoding="utf-8",
+    )
+
+    code = main([
+        "--app-root", str(app_root),
+        "candidate-pool-run",
+        "--input", str(input_path),
+        "--as-of-date", "not-a-date",
+    ])
+
+    assert code == 2
+    assert "invalid candidate-pool-run input" in capsys.readouterr().out
+
+
+def test_candidate_pool_run_cli_rejects_non_dict_ticker(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "universe.json"
+    input_path.write_text(
+        '{"as_of_date":"2026-04-30","source":"fixture","universe_id":"u1","tickers":["AAPL"]}',
+        encoding="utf-8",
+    )
+
+    code = main([
+        "--app-root", str(app_root),
+        "candidate-pool-run",
+        "--input", str(input_path),
+        "--as-of-date", "2026-04-30",
+    ])
+
+    assert code == 2
+    assert "invalid candidate-pool-run input" in capsys.readouterr().out
+
+
+def test_candidate_pool_run_cli_rejects_negative_max_candidates(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "universe.json"
+    input_path.write_text(
+        '{"as_of_date":"2026-04-30","source":"fixture","universe_id":"u1","tickers":[]}',
+        encoding="utf-8",
+    )
+
+    code = main([
+        "--app-root", str(app_root),
+        "candidate-pool-run",
+        "--input", str(input_path),
+        "--max-candidates", "-1",
+    ])
+
+    assert code == 2
+    assert "invalid candidate-pool-run input" in capsys.readouterr().out
