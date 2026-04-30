@@ -2992,3 +2992,112 @@ class ResearchDatabase:
                 result[phase] = []
         conn.close()
         return result
+
+    def initialize_market_data_readiness_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS market_data_readiness_reports (
+                    report_id TEXT PRIMARY KEY,
+                    schema_version TEXT NOT NULL,
+                    as_of_date TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    host TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    symbols_json TEXT NOT NULL,
+                    history_days INTEGER NOT NULL,
+                    option_symbol TEXT NOT NULL,
+                    live INTEGER NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    report_json TEXT NOT NULL,
+                    UNIQUE(as_of_date, host, port, symbols_json, history_days, option_symbol, live, source_hash)
+                )"""
+            )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_market_data_readiness_as_of_date
+                   ON market_data_readiness_reports(as_of_date)"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_market_data_readiness_report(self, report: dict) -> str:
+        self.initialize_market_data_readiness_schema()
+        conn = self._get_connection()
+        try:
+            report_id = report["report_id"]
+            conn.execute(
+                """INSERT OR IGNORE INTO market_data_readiness_reports
+                   (report_id, schema_version, as_of_date, created_at, status,
+                    host, port, symbols_json, history_days, option_symbol, live,
+                    source_hash, report_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    report_id,
+                    report["schema_version"],
+                    report["as_of_date"],
+                    report["created_at"],
+                    report["status"],
+                    report["host"],
+                    report["port"],
+                    json.dumps(report["symbols"], sort_keys=True),
+                    report["history_days"],
+                    report["option_symbol"],
+                    int(report["live"]),
+                    report["source_hash"],
+                    json.dumps(report, sort_keys=True, default=str),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return report_id
+
+    def list_market_data_readiness_reports(
+        self, *, as_of_date: str | None = None, limit: int = 50
+    ) -> list[dict]:
+        self.initialize_market_data_readiness_schema()
+        conn = self._get_connection()
+        try:
+            if as_of_date:
+                cursor = conn.execute(
+                    """SELECT report_id, schema_version, as_of_date, created_at,
+                              status, host, port, symbols_json, history_days,
+                              option_symbol, live, source_hash, report_json
+                       FROM market_data_readiness_reports
+                       WHERE as_of_date = ?
+                       ORDER BY created_at DESC
+                       LIMIT ?""",
+                    (as_of_date, limit),
+                )
+            else:
+                cursor = conn.execute(
+                    """SELECT report_id, schema_version, as_of_date, created_at,
+                              status, host, port, symbols_json, history_days,
+                              option_symbol, live, source_hash, report_json
+                       FROM market_data_readiness_reports
+                       ORDER BY created_at DESC
+                       LIMIT ?""",
+                    (limit,),
+                )
+            rows = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                rows.append({
+                    "report_id": d["report_id"],
+                    "schema_version": d["schema_version"],
+                    "as_of_date": d["as_of_date"],
+                    "created_at": d["created_at"],
+                    "status": d["status"],
+                    "host": d["host"],
+                    "port": d["port"],
+                    "symbols": json.loads(d["symbols_json"]),
+                    "history_days": d["history_days"],
+                    "option_symbol": d["option_symbol"],
+                    "live": bool(d["live"]),
+                    "source_hash": d["source_hash"],
+                })
+            return rows
+        finally:
+            conn.close()
