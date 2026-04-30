@@ -48,9 +48,19 @@ judgment, canonical signal/report objects, and optional image-report generation.
 
 The governance flow starts from P20-P30 evidence, then runs P31 readiness,
 P32 artifact registry and dry-run generation validation, P33 signal-family edge
-review, P34 boss governance brief, and P35 local runtime orchestration. This
-flow writes append-only governance artifacts under `output/governance/YYYY-MM-DD/`
-and does not create broker orders or production approval.
+review, P34 boss governance brief, P35 local runtime orchestration, and P36
+recommendation outcome tracking. This flow writes append-only governance
+artifacts under `output/governance/YYYY-MM-DD/` and does not create broker
+orders or production approval.
+
+#### P36 Outcome Tracking
+
+`recommendation_outcomes.py` consumes canonical signals and canonical reports
+after research has completed. It persists forward outcome rows in
+`canonical_recommendation_outcomes`, then emits standalone P36 artifacts under
+`output/governance/YYYY-MM-DD/`. The flow is one-way and read-only with respect
+to research decisions: outcomes do not alter `final_judge`, `RoleWeightConfig`,
+P33 edge review, P35 runtime, or production configuration in P36.
 
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
