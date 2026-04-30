@@ -89,7 +89,11 @@ class FutuQuoteClient:
                 rows.append({
                     "day": day_index,
                     "date": date_value,
+                    "open": float(row["open"]) if row.get("open") is not None else None,
+                    "high": float(row["high"]) if row.get("high") is not None else None,
+                    "low": float(row["low"]) if row.get("low") is not None else None,
                     "close": float(close_value),
+                    "price_adjustment": "adjusted",
                 })
             return rows
         finally:
