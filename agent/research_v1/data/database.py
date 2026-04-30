@@ -2972,7 +2972,11 @@ class ResearchDatabase:
                                 if isinstance(parsed, dict):
                                     payload.update(parsed)
                                 else:
-                                    payload[json_col] = parsed
+                                    # Strip _json suffix so consumers see e.g.
+                                    # payload["missing_context"] instead of
+                                    # payload["missing_context_json"].
+                                    mapped_key = json_col[:-5] if json_col.endswith("_json") else json_col
+                                    payload[mapped_key] = parsed
                             except (json.JSONDecodeError, TypeError):
                                 pass
                     rows.append({

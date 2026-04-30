@@ -529,3 +529,117 @@ def test_recommended_actions_in_markdown(tmp_path: Path):
     md = _markdown(report)
 
     assert "collect_missing_evidence" in md
+
+
+# ── Audit regression tests ──────────────────────────────────────────────
+
+def test_artifact_content_revision_changes_source_hash(tmp_path: Path):
+    """Same-date valid JSON artifact content changes while row inputs stay identical."""
+    root = tmp_path / "governance"
+    day = root / "2026-04-30"
+    day.mkdir(parents=True, exist_ok=True)
+    target = day / "p42_boss_copilot_daily_brief.json"
+    target.write_text(json.dumps({"schema_version": "p42", "status": "v1"}), encoding="utf-8")
+    first = build_evidence_freshness_drift_report(
+        as_of_date="2026-04-30",
+        lookback_days=14,
+        freshness_days=3,
+        phase_rows={},
+        governance_root=root,
+    )
+    target.write_text(json.dumps({"schema_version": "p42", "status": "v2"}), encoding="utf-8")
+    second = build_evidence_freshness_drift_report(
+        as_of_date="2026-04-30",
+        lookback_days=14,
+        freshness_days=3,
+        phase_rows={},
+        governance_root=root,
+    )
+
+    assert first["source_hash"] != second["source_hash"]
+
+
+def test_newer_valid_artifact_supersedes_older_invalid(tmp_path: Path):
+    """Stale bad JSON from 2026-04-29 does not poison a valid 2026-04-30 artifact."""
+    root = tmp_path / "governance"
+    old_day = root / "2026-04-29"
+    old_day.mkdir(parents=True, exist_ok=True)
+    (old_day / "p42_boss_copilot_daily_brief.json").write_text("{bad json", encoding="utf-8")
+    new_day = root / "2026-04-30"
+    new_day.mkdir(parents=True, exist_ok=True)
+    (new_day / "p42_boss_copilot_daily_brief.json").write_text(
+        json.dumps({"schema_version": "p42", "status": "brief_ready"}), encoding="utf-8",
+    )
+
+    report = build_evidence_freshness_drift_report(
+        as_of_date="2026-04-30",
+        lookback_days=14,
+        freshness_days=3,
+        phase_rows={},
+        governance_root=root,
+    )
+
+    p42 = next(p for p in report["phase_monitors"] if p["phase_id"] == "P42")
+    assert p42["freshness_status"] != "invalid"
+    assert p42["coverage_status"] != "invalid"
+    assert not p42["warnings"]
+
+
+def test_coverage_partial_when_artifact_older_than_latest_evidence(tmp_path: Path):
+    """Fresh DB row for 2026-04-30 but artifact only from 2026-04-20 → partial."""
+    root = tmp_path / "governance"
+    old_day = root / "2026-04-20"
+    old_day.mkdir(parents=True, exist_ok=True)
+    (old_day / "p42_boss_copilot_daily_brief.json").write_text(
+        json.dumps({"schema_version": "p42"}), encoding="utf-8",
+    )
+    phase_rows = {"P42": [_phase_row("P42", as_of_date="2026-04-30")]}
+
+    report = build_evidence_freshness_drift_report(
+        as_of_date="2026-04-30",
+        lookback_days=14,
+        freshness_days=3,
+        phase_rows=phase_rows,
+        governance_root=root,
+    )
+
+    p42 = next(p for p in report["phase_monitors"] if p["phase_id"] == "P42")
+    assert p42["coverage_status"] == "partial"
+
+
+def test_p40_missing_context_aggregated_from_db(tmp_path: Path):
+    """P40 missing_context_json column maps to payload['missing_context']."""
+    db = _db(tmp_path)
+    db.initialize_memory_pack_schema()
+    conn = db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO research_memory_packs
+        (pack_id, schema_version, as_of_date, created_at, ticker, lookback_days,
+         memory_status, source_hash, latest_research_json, outcome_summary_json,
+         candidate_history_json, quality_context_json, regime_context_json,
+         watchlist_context_json, validation_context_json, recurring_themes_json,
+         risk_memory_json, missing_context_json, source_refs_json, summary)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        "pk-test-1", "p40.1", "2026-04-30", "2026-04-30T12:00:00+00:00",
+        "AAPL", 180, "memory_available", "hash1",
+        "{}", "{}", "{}", "{}", "{}", "{}", "{}", "{}", "{}",
+        json.dumps(["missing_fundamental_quality", "missing_regime"]),
+        "{}", "test",
+    ))
+    conn.commit()
+    conn.close()
+
+    phase_rows = db.collect_evidence_phase_rows("2026-04-30", 14)
+    report = build_evidence_freshness_drift_report(
+        as_of_date="2026-04-30",
+        lookback_days=14,
+        freshness_days=3,
+        phase_rows=phase_rows,
+        governance_root=tmp_path / "governance",
+    )
+
+    keys = {p["key"] for p in report["missing_context_patterns"]}
+    assert "missing_fundamental_quality" in keys
+    assert "missing_regime" in keys

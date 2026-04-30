@@ -50,24 +50,30 @@ def _days_old(as_of_date: str, evidence_date: str) -> int:
     return (_parse_date(as_of_date) - _parse_date(evidence_date)).days
 
 
-def _artifact_status(governance_root: Path, as_of_date: str, lookback_days: int, artifact_name: str) -> tuple[int, str, list[str]]:
+def _artifact_status(governance_root: Path, as_of_date: str, lookback_days: int, artifact_name: str) -> tuple[int, str, list[str], str]:
     root = Path(governance_root)
     warnings: list[str] = []
     found_count = 0
     latest_date = ""
+    latest_content_hash = ""
     for i in range(lookback_days):
         day = (_parse_date(as_of_date) - timedelta(days=i)).isoformat()
         path = root / day / artifact_name
         if not path.exists():
             continue
         found_count += 1
+        try:
+            content = path.read_bytes()
+        except OSError:
+            continue
         if not latest_date:
             latest_date = day
-        try:
-            json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-            warnings.append(f"invalid_json:{artifact_name}")
-    return found_count, latest_date, sorted(set(warnings))
+            latest_content_hash = hashlib.sha256(content).hexdigest()
+            try:
+                json.loads(content)
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                warnings.append(f"invalid_json:{artifact_name}")
+    return found_count, latest_date, sorted(set(warnings)), latest_content_hash
 
 
 def _freshness(as_of_date: str, latest_date: str, freshness_days: int, invalid: bool) -> str:
@@ -90,13 +96,15 @@ def _churn(rows: list[dict]) -> str:
     return "high_churn"
 
 
-def _coverage(row_count: int, artifact_count: int, invalid: bool) -> str:
+def _coverage(row_count: int, artifact_count: int, invalid: bool, latest_evidence_date: str, artifact_latest_date: str) -> str:
     if invalid:
         return "invalid"
     if row_count == 0 and artifact_count == 0:
         return "missing"
-    if artifact_count > 0:
+    if artifact_count > 0 and artifact_latest_date and latest_evidence_date and artifact_latest_date >= latest_evidence_date:
         return "complete"
+    if artifact_count > 0:
+        return "partial"
     return "partial"
 
 
@@ -152,15 +160,18 @@ def build_evidence_freshness_drift_report(
     governance_root: Path,
 ) -> dict[str, Any]:
     phase_monitors = []
+    artifact_fingerprints: dict[str, str] = {}
     for phase_id, phase_name, artifact_name in PHASES:
         rows = phase_rows.get(phase_id, [])
         latest = _latest_row(rows)
-        artifact_count, artifact_latest_date, artifact_warnings = _artifact_status(governance_root, as_of_date, lookback_days, artifact_name)
+        artifact_count, artifact_latest_date, artifact_warnings, artifact_content_hash = _artifact_status(governance_root, as_of_date, lookback_days, artifact_name)
+        if artifact_content_hash:
+            artifact_fingerprints[artifact_name] = artifact_content_hash
         latest_date = latest.get("as_of_date") or artifact_latest_date
         invalid = bool(artifact_warnings)
         freshness_status = _freshness(as_of_date, latest_date, freshness_days, invalid)
         churn_status = _churn(rows)
-        coverage_status = _coverage(len(rows), artifact_count, invalid)
+        coverage_status = _coverage(len(rows), artifact_count, invalid, latest_date, artifact_latest_date)
         phase_monitors.append({
             "phase_id": phase_id,
             "phase_name": phase_name,
@@ -186,6 +197,7 @@ def build_evidence_freshness_drift_report(
         "freshness_days": freshness_days,
         "phase_monitors": phase_monitors,
         "missing_context_patterns": missing_patterns,
+        "artifact_fingerprints": artifact_fingerprints,
     }
     source_hash = _sha(seed)
     report_id = hashlib.sha256(f"{as_of_date}|{lookback_days}|{freshness_days}|{source_hash}".encode("utf-8")).hexdigest()[:16]
