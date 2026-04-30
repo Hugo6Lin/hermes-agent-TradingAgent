@@ -326,3 +326,46 @@ def test_p40_hard_boundaries_are_explicit():
     }
     assert not (forbidden_names & set(p40.__dict__))
     assert "research-memory evidence only" in p40.P40_ARTIFACT_DISCLAIMER
+
+
+# ── As-of semantics regression tests ─────────────────────────────────────
+
+def test_future_outcome_excluded_from_as_of_memory_pack():
+    """P1: outcomes with evaluated_for_date > as_of_date must be filtered out."""
+    signal = {"signal_id": "s1", "task_id": "t1", "ticker": "AAPL", "rating": "BULLISH", "confidence": 0.8, "priority_score": 0.7, "created_at": "2026-04-29T10:00:00+00:00", "risk_flags": []}
+    records = {
+        "signals": [signal],
+        "outcomes_by_signal": {
+            "s1": [
+                {"status": "evaluated", "net_return_pct": 0.04, "win": True, "evaluated_for_date": "2026-04-30"},
+                {"status": "evaluated", "net_return_pct": 0.10, "win": True, "evaluated_for_date": "2026-05-30"},
+            ]
+        },
+    }
+    pack = build_research_memory_pack("AAPL", "2026-04-30", 180, records)
+
+    assert pack["outcome_summary"]["total_outcome_rows"] == 1
+    assert pack["outcome_summary"]["evaluated_rows"] == 1
+    assert pack["outcome_summary"]["win_rate"] == 1.0
+    assert pack["outcome_summary"]["latest_outcome_date"] == "2026-04-30"
+
+
+def test_stale_theme_uses_as_of_date_not_wall_clock():
+    """P2: stale_research_context must depend on as_of_date, not when the command runs."""
+    report = {
+        "report_id": "r1",
+        "task_id": "t1",
+        "ticker": "AAPL",
+        "title": "AAPL report",
+        "created_at": "2026-01-01T10:00:00+00:00",
+        "decision_card_json": '{"primary_action":"Buy Stock"}',
+    }
+    records = {"reports": [report]}
+
+    # as_of 2026-02-01: only 31 days, not stale
+    pack_not_stale = build_research_memory_pack("AAPL", "2026-02-01", 180, records)
+    assert "stale_research_context" not in pack_not_stale["recurring_themes"]
+
+    # as_of 2026-04-30: 119 days, stale
+    pack_stale = build_research_memory_pack("AAPL", "2026-04-30", 180, records)
+    assert "stale_research_context" in pack_stale["recurring_themes"]

@@ -64,10 +64,14 @@ def _resolve_visible_action(report: dict[str, Any]) -> tuple[str, list[str]]:
     return "unknown_prior_action", warnings
 
 
-def _summarize_outcomes(outcomes_by_signal: dict[str, list[dict]]) -> dict[str, Any]:
+def _summarize_outcomes(outcomes_by_signal: dict[str, list[dict]], as_of_date: str = "") -> dict[str, Any]:
     all_outcomes: list[dict] = []
     for signal_id, rows in outcomes_by_signal.items():
-        all_outcomes.extend(rows)
+        for row in rows:
+            eval_date = row.get("evaluated_for_date", "")
+            if as_of_date and eval_date and eval_date > as_of_date:
+                continue
+            all_outcomes.append(row)
 
     total = len(all_outcomes)
     evaluated_rows = sum(1 for o in all_outcomes if o.get("status") == "evaluated")
@@ -174,7 +178,7 @@ def _regime_context(regime_snapshot: dict | None, missing_context: list[str]) ->
     }
 
 
-def _derive_recurring_themes(pack_parts: dict) -> list[str]:
+def _derive_recurring_themes(pack_parts: dict, as_of_date: str = "") -> list[str]:
     themes: list[str] = []
 
     candidate = pack_parts.get("candidate_history", {})
@@ -200,11 +204,11 @@ def _derive_recurring_themes(pack_parts: dict) -> list[str]:
         themes.append("negative_outcome_history")
 
     latest_research = pack_parts.get("latest_research", {})
-    if latest_research.get("created_at"):
+    if latest_research.get("created_at") and as_of_date:
         try:
             created = datetime.fromisoformat(latest_research["created_at"].replace("Z", "+00:00"))
-            now = datetime.now(timezone.utc)
-            if (now - created).days > 90:
+            as_of = datetime.fromisoformat(as_of_date + "T00:00:00+00:00")
+            if (as_of - created).days > 90:
                 themes.append("stale_research_context")
         except (ValueError, TypeError):
             pass
@@ -287,7 +291,7 @@ def build_research_memory_pack(
     missing_context: list[str] = []
     if not latest_research:
         missing_context.append("missing_research_context")
-    outcome_summary = _summarize_outcomes(records.get("outcomes_by_signal", {}))
+    outcome_summary = _summarize_outcomes(records.get("outcomes_by_signal", {}), as_of_date)
     if outcome_summary["total_outcome_rows"] == 0:
         missing_context.append("missing_outcome_context")
     candidate_history = _summarize_candidate_history(records.get("candidate_items", []))
@@ -312,7 +316,7 @@ def build_research_memory_pack(
         "validation_context": validation_context,
         "missing_context_list": missing_context,
     }
-    recurring_themes = _derive_recurring_themes(pack_parts)
+    recurring_themes = _derive_recurring_themes(pack_parts, as_of_date)
     risk_memory = _derive_risk_memory(pack_parts, action_warnings)
     source_refs = {
         "signal_ids": [row.get("signal_id", "") for row in selected_signals],
