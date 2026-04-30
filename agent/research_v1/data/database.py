@@ -1911,3 +1911,91 @@ class ResearchDatabase:
             "evaluated_at": row["evaluated_at"],
             "created_at": row["created_at"],
         }
+
+    # ── P37 Market Regime Snapshots ──────────────────────────────────────────
+
+    def initialize_market_regime_schema(self) -> None:
+        """Create market_regime_snapshots table."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS market_regime_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                regime_label TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                coverage_ratio REAL NOT NULL,
+                summary_json TEXT NOT NULL,
+                metrics_json TEXT NOT NULL,
+                proxy_metrics_json TEXT NOT NULL,
+                sector_rotation_json TEXT NOT NULL,
+                classification_reasons_json TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                missing_symbols_json TEXT NOT NULL,
+                stale_symbols_json TEXT NOT NULL,
+                data_source_hash TEXT NOT NULL,
+                UNIQUE(as_of_date, data_source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_market_regime_snapshot(self, snapshot: dict) -> str:
+        """Persist a market-regime snapshot. Idempotent by (as_of_date, data_source_hash)."""
+        import hashlib as _hashlib
+        natural_key = f"{snapshot['as_of_date']}|{snapshot['data_source_hash']}"
+        snapshot_id = _hashlib.sha256(natural_key.encode("utf-8")).hexdigest()[:16]
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO market_regime_snapshots (
+                snapshot_id, schema_version, as_of_date, created_at,
+                regime_label, confidence, coverage_ratio,
+                summary_json, metrics_json, proxy_metrics_json,
+                sector_rotation_json, classification_reasons_json,
+                warnings_json, missing_symbols_json, stale_symbols_json,
+                data_source_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                snapshot_id,
+                snapshot["schema_version"],
+                snapshot["as_of_date"],
+                snapshot["created_at"],
+                snapshot["regime_label"],
+                snapshot["confidence"],
+                snapshot["coverage_ratio"],
+                json.dumps(snapshot.get("summary", "")),
+                json.dumps({}),  # metrics_json placeholder
+                json.dumps(snapshot.get("proxy_metrics", {})),
+                json.dumps(snapshot.get("sector_rotation", {})),
+                json.dumps(snapshot.get("classification_reasons", [])),
+                json.dumps(snapshot.get("warnings", [])),
+                json.dumps(snapshot.get("missing_symbols", [])),
+                json.dumps(snapshot.get("stale_symbols", [])),
+                snapshot["data_source_hash"],
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return snapshot_id
+
+    def list_market_regime_snapshots(self, as_of_date: str | None = None, limit: int = 20) -> list[dict]:
+        """List persisted market-regime snapshots, optionally filtered by as_of_date."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if as_of_date:
+            cursor.execute(
+                "SELECT * FROM market_regime_snapshots WHERE as_of_date = ? ORDER BY created_at DESC LIMIT ?",
+                (as_of_date, limit),
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM market_regime_snapshots ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]

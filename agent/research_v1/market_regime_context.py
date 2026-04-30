@@ -171,14 +171,18 @@ def compute_proxy_metrics(
 # ── Data source hashing ─────────────────────────────────────────────────────
 
 def compute_data_source_hash(histories: dict[str, list[dict]]) -> str:
-    """Deterministic SHA-256 over sorted symbol → first/last date + count."""
+    """Deterministic SHA-256 over sorted symbol → count, dates, and close prices."""
     parts: list[str] = []
     for symbol in sorted(histories):
         rows = histories[symbol]
         if rows:
-            parts.append(f"{symbol}:{len(rows)}:{rows[0].get('date','')}:{rows[-1].get('date','')}")
+            first_close = rows[0].get("close", "")
+            last_close = rows[-1].get("close", "")
+            parts.append(
+                f"{symbol}:{len(rows)}:{rows[0].get('date','')}:{rows[-1].get('date','')}:{first_close}:{last_close}"
+            )
         else:
-            parts.append(f"{symbol}:0::")
+            parts.append(f"{symbol}:0:::")
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
