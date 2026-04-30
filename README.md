@@ -3,9 +3,9 @@
 Hermes is a boss-first trading research and governance system.
 
 It turns ticker research requests into structured financial conclusions, bullish
-instrument recommendations, boss-facing reports, and now an auditable governance
-evidence loop that helps decide whether a system version, signal family, or
-shadow model is ready for continued observation or human review.
+instrument recommendations, boss-facing reports, and an auditable governance
+runtime that helps decide whether a system version, signal family, or shadow
+model is ready for continued observation or human review.
 
 Hermes is not an auto-trading bot. It does not approve production adoption by
 itself, mutate production calibration config, or promote shadow model outputs
@@ -31,6 +31,7 @@ This branch has moved beyond the old P20 starting point. It now includes:
 - P32 evidence artifact registry and dry-run generation validator
 - P33 signal-family edge review
 - P34 boss governance daily brief
+- P35 local governance runtime, CLI entrypoint, and documentation standards closure
 
 ## What Hermes Answers
 
@@ -73,6 +74,7 @@ It does this in four layers:
    - dry-run evidence generation manifest
    - edge review
    - boss governance daily brief
+   - local governance runtime and CLI wrapper
 
 ## Current Product Status
 
@@ -93,8 +95,10 @@ It does this in four layers:
 | P32 evidence artifact registry and dry-run generator | Shipped |
 | P33 signal-family edge review | Shipped |
 | P34 boss governance daily brief | Shipped |
-| CLI/viewer integration for governance loop | Deferred |
-| Actual controlled evidence generation | Future phase |
+| P35 local governance runtime and CLI | Shipped |
+| Documentation standards for research module | Shipped |
+| Governance viewer integration | Deferred |
+| Actual controlled evidence generation | Deferred |
 | Auto-trading | Explicit non-goal |
 
 ## Main System Flow
@@ -118,6 +122,9 @@ flowchart TD
     M --> O["P33 SignalFamilyEdgeReview"]
     L --> P["P34 BossGovernanceDailyBrief"]
     O --> P
+    P --> Q["P35 GovernanceRuntime"]
+    M --> Q
+    N --> Q
 ```
 
 ## Governance Loop
@@ -130,6 +137,7 @@ P31 DailyGovernanceRun
   -> P32-B ControlledEvidenceGenerationDryRun
   -> P33 SignalFamilyEdgeReview
   -> P34 BossGovernanceDailyBrief
+  -> P35 GovernanceRuntime / governance-run CLI
 ```
 
 ### P31: Readiness Dossiers
@@ -206,6 +214,30 @@ It converts P31-P33 governance outputs into a boss-readable daily summary:
 - next governance actions
 
 It does not provide trade instructions.
+
+### P35: Governance Runtime
+
+P35 adds:
+
+- `GovernanceRuntimeRequest`
+- `GovernanceRuntimeResult`
+- `run_governance_runtime(...)`
+- `hermes-research governance-run`
+
+It gives operators and review models one controlled local entrypoint for the
+P31-P34 loop. It reads explicit JSON config, adapts that config into existing
+P31-P34 request contracts, writes machine-readable and Markdown artifacts under
+`output/governance/YYYY-MM-DD/`, and returns structured status.
+
+P35 also closes the research-module documentation standards gaps:
+
+- `agent/research_v1/README.md` now includes current data flow.
+- `agent/research_v1/report_templates/README.md` exists.
+- `tests/agent/research_v1/test_doc_standards.py` passes.
+
+P35 is still governance-only. It does not run real evidence generation jobs,
+train models, schedule work, send notifications, open a viewer, place trades, or
+approve production adoption.
 
 ## Hard Boundaries
 
@@ -284,6 +316,95 @@ agent/research_v1/signal_family_edge_review.py
 agent/research_v1/boss_governance_brief.py
 ```
 
+### P35 Governance Runtime
+
+Core module:
+
+```text
+agent/research_v1/governance_runtime.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli governance-run \
+  --config path/to/governance_config.json \
+  --run-date 2026-04-30 \
+  --output-root output/governance
+```
+
+The CLI default output root is resolved under `--app-root` when a relative path
+is provided.
+
+Minimum config shape:
+
+```json
+{
+  "version_readiness": {
+    "version_id": "p35-local",
+    "branch": "codex/quant-governance-p20-p30",
+    "commit": "local",
+    "evidence": {
+      "p20_p30_regression_passed": true,
+      "p31_p34_regression_passed": true,
+      "doc_standards_passed": true
+    },
+    "notes": "local governance runtime"
+  },
+  "signal_families": [],
+  "expected_artifacts": [],
+  "generation_requests": [],
+  "edge_reviews": []
+}
+```
+
+Invalid JSON or structurally invalid config returns `blocked_invalid_config`.
+Write failures return `governance_degraded`. Requests with
+`allow_actual_execution=true` remain blocked by P32-B dry-run rules.
+
+## Important Files for New Models
+
+If another model is taking over, read these files first, in this order:
+
+1. `README.md`
+   - current system map, phase status, hard boundaries, verification commands
+2. `agent/research_v1/README.md`
+   - research module data flow and local ownership rules
+3. `agent/research_v1/AGENT.md`
+   - agent responsibilities, boundaries, and change-propagation expectations
+4. `agent/research_v1/app.py`
+   - `HermesResearchApp.run()` and the canonical research entrypoint
+5. `agent/research_v1/orchestrator.py`
+   - research workflow control and evidence gathering
+6. `agent/research_v1/final_judge.py`
+   - canonical signal and report decision construction
+7. `agent/research_v1/governance_runtime.py`
+   - P35 runtime wrapper around P31-P34
+8. `agent/research_v1/daily_governance.py`
+   - P31 daily governance run
+9. `agent/research_v1/evidence_artifact_registry.py`
+   - P32 artifact registry
+10. `agent/research_v1/evidence_generation_dry_run.py`
+    - P32-B dry-run validator
+11. `agent/research_v1/signal_family_edge_review.py`
+    - P33 signal-family edge review
+12. `agent/research_v1/boss_governance_brief.py`
+    - P34 boss daily brief
+13. `agent/research_v1/batch_cli.py`
+    - local CLI, including `governance-run`
+14. `docs/superpowers/specs/2026-04-30-hermes-p35-governance-runtime-design.md`
+    - P35 design
+15. `docs/superpowers/plans/2026-04-30-p35-governance-runtime.md`
+    - P35 implementation plan and verification commands
+
+For regression behavior, read the matching tests in `tests/agent/research_v1/`,
+especially:
+
+- `test_governance_runtime.py`
+- `test_batch_cli.py`
+- `test_doc_standards.py`
+- `test_signal_family_edge_review.py`
+
 ## Verification
 
 Use Python 3.11:
@@ -292,7 +413,23 @@ Use Python 3.11:
 /opt/homebrew/bin/python3.11
 ```
 
-### P31-P34 Governance Loop
+### P35 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_governance_runtime.py \
+  tests/agent/research_v1/test_batch_cli.py \
+  tests/agent/research_v1/test_doc_standards.py \
+  -q
+```
+
+Recent result:
+
+```text
+58 passed
+```
+
+### P31-P35 Governance Loop
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -303,19 +440,17 @@ Use Python 3.11:
   tests/agent/research_v1/test_evidence_generation_dry_run.py \
   tests/agent/research_v1/test_signal_family_edge_review.py \
   tests/agent/research_v1/test_boss_governance_brief.py \
+  tests/agent/research_v1/test_governance_runtime.py \
   -q
 ```
 
 Recent result:
 
 ```text
-55 passed, 2 warnings
+60 passed
 ```
 
-The warnings are benign `PytestCollectionWarning` messages for the `TestEvidence`
-dataclass name.
-
-### Full P20-P34 Governance Chain
+### Full P20-P35 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -347,25 +482,21 @@ dataclass name.
   tests/agent/research_v1/test_evidence_generation_dry_run.py \
   tests/agent/research_v1/test_signal_family_edge_review.py \
   tests/agent/research_v1/test_boss_governance_brief.py \
+  tests/agent/research_v1/test_governance_runtime.py \
   -q
 ```
 
 Recent result:
 
 ```text
-543 passed, 2 warnings
+550 passed
 ```
 
-## Known Test Gap
+## Known Environment-Specific Test Gap
 
-`tests/agent/research_v1/test_doc_standards.py` currently has known
-pre-existing documentation failures:
-
-- `agent/research_v1/README.md` is missing a required Data Flow / How It Fits heading.
-- `agent/research_v1/report_templates/` has Python files but no `README.md`.
-
-These are documentation hygiene gaps and are not part of the P31-P34 governance
-implementation.
+`test_app_end_to_end_init_ingest_and_export_pdf` can fail on hosts that do not
+have Microsoft Edge installed. This is unrelated to P35 governance runtime
+behavior.
 
 ## Useful Paths
 
@@ -386,6 +517,8 @@ implementation.
 - [P31 governance readiness plan](docs/superpowers/plans/2026-04-29-governance-readiness.md)
 - [P32-P34 governance evidence loop spec](docs/superpowers/specs/2026-04-29-hermes-p32-p34-governance-evidence-loop-spec.md)
 - [P32-P34 governance evidence loop plan](docs/superpowers/plans/2026-04-29-p32-p34-governance-evidence-loop.md)
+- [P35 governance runtime spec](docs/superpowers/specs/2026-04-30-hermes-p35-governance-runtime-design.md)
+- [P35 governance runtime plan](docs/superpowers/plans/2026-04-30-p35-governance-runtime.md)
 - [P29 production adoption review spec](docs/superpowers/specs/2026-04-26-hermes-phase29-production-adoption-review-pack-spec.md)
 - [P30 advanced model pack spec](docs/superpowers/specs/2026-04-26-hermes-phase30-advanced-model-pack-spec.md)
 
@@ -398,5 +531,9 @@ If you are a model, agent, or operator newly entering this repository:
 3. Read `agent/research_v1/AGENT.md`.
 4. Treat `HermesResearchApp.run()` as the research truth.
 5. Treat `generate_image_report()` as downstream boss-report delivery.
-6. Treat P31-P34 governance outputs as advisory evidence, not production approval.
-7. Do not add auto-trading or production promotion paths without a new approved spec.
+6. Treat P31-P35 governance outputs as advisory evidence, not production approval.
+7. Treat P35 `governance-run` as a local runtime wrapper, not as a scheduler or
+   execution engine.
+8. Do not add auto-trading, real evidence generation, model training, production
+   promotion, scheduling, notifications, or broker wiring without a new approved
+   spec.
