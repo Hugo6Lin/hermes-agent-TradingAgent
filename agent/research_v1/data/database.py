@@ -2505,3 +2505,120 @@ class ResearchDatabase:
         row = cursor.fetchone()
         conn.close()
         return dict(row) if row else None
+
+    # ── P41 decision journal helpers ──────────────────────────────────────
+
+    def initialize_decision_journal_schema(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS decision_journal_entries (
+                journal_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                contemplated_action TEXT NOT NULL,
+                decision_intent TEXT NOT NULL,
+                boss_confidence REAL,
+                urgency TEXT,
+                severity TEXT NOT NULL,
+                cooling_off_suggestion TEXT NOT NULL,
+                memory_pack_id TEXT,
+                source_hash TEXT NOT NULL,
+                entry_json TEXT NOT NULL,
+                UNIQUE(ticker, as_of_date, contemplated_action, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_decision_journal_entry(self, entry: dict) -> str:
+        self.initialize_decision_journal_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO decision_journal_entries (
+                journal_id, schema_version, as_of_date, created_at,
+                ticker, contemplated_action, decision_intent,
+                boss_confidence, urgency, severity,
+                cooling_off_suggestion, memory_pack_id,
+                source_hash, entry_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                entry["journal_id"],
+                entry["schema_version"],
+                entry["as_of_date"],
+                entry["created_at"],
+                entry["ticker"],
+                entry["contemplated_action"],
+                entry["decision_intent"],
+                entry.get("boss_confidence"),
+                entry.get("urgency"),
+                entry["severity"],
+                entry["cooling_off_suggestion"],
+                entry.get("memory_ref", {}).get("pack_id", ""),
+                entry["source_hash"],
+                json.dumps(entry),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return entry["journal_id"]
+
+    def list_decision_journal_entries(
+        self,
+        ticker: str | None = None,
+        as_of_date: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        self.initialize_decision_journal_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        conditions: list[str] = []
+        params: list[Any] = []
+        if ticker:
+            conditions.append("ticker = ?")
+            params.append(ticker)
+        if as_of_date:
+            conditions.append("as_of_date = ?")
+            params.append(as_of_date)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+        cursor.execute(
+            f"SELECT * FROM decision_journal_entries {where} ORDER BY created_at DESC, journal_id ASC LIMIT ?",
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_latest_research_memory_pack(self, ticker: str, as_of_date: str) -> dict | None:
+        self.initialize_memory_pack_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM research_memory_packs
+               WHERE ticker = ? AND as_of_date <= ?
+               ORDER BY as_of_date DESC, created_at DESC, pack_id ASC
+               LIMIT 1""",
+            (ticker, as_of_date),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        d = dict(row)
+        # Decode JSON columns back into P40 pack shape
+        for col in (
+            "latest_research_json", "outcome_summary_json", "candidate_history_json",
+            "quality_context_json", "regime_context_json", "watchlist_context_json",
+            "validation_context_json", "recurring_themes_json", "risk_memory_json",
+            "missing_context_json", "source_refs_json",
+        ):
+            key = col.replace("_json", "")
+            try:
+                d[key] = json.loads(d.pop(col, "null") or "null")
+            except (json.JSONDecodeError, TypeError):
+                d[key] = [] if "themes" in col or "risk" in col or "missing" in col else {}
+        return d

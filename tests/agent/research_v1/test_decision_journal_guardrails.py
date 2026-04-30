@@ -135,3 +135,57 @@ def test_source_hash_changes_when_memory_source_changes():
 def test_disclaimer_contains_required_phrase():
     entry = build_decision_journal_entry(_decision(), "2026-04-30", None)
     assert "behavioral guardrail evidence only" in entry["disclaimer"]
+
+
+# ── P41-B persistence and artifact tests ─────────────────────────────────
+
+from agent.research_v1.data.database import ResearchDatabase
+from agent.research_v1.decision_journal_guardrails import write_decision_journal_artifacts
+
+
+def _db(tmp_path: Path) -> ResearchDatabase:
+    db = ResearchDatabase(str(tmp_path / "research.db"))
+    db.initialize()
+    db.initialize_decision_journal_schema()
+    return db
+
+
+def test_decision_journal_persistence_is_idempotent(tmp_path: Path):
+    db = _db(tmp_path)
+    entry = build_decision_journal_entry(_decision(), "2026-04-30", None)
+    first = db.save_decision_journal_entry(entry)
+    second = db.save_decision_journal_entry(entry)
+    rows = db.list_decision_journal_entries(ticker="AAPL", as_of_date="2026-04-30")
+    assert first == second
+    assert len(rows) == 1
+
+
+def test_decision_journal_revised_source_hash_appends(tmp_path: Path):
+    db = _db(tmp_path)
+    first_entry = build_decision_journal_entry(_decision(stated_reason="first"), "2026-04-30", None)
+    second_entry = build_decision_journal_entry(_decision(stated_reason="second"), "2026-04-30", None)
+    first = db.save_decision_journal_entry(first_entry)
+    second = db.save_decision_journal_entry(second_entry)
+    rows = db.list_decision_journal_entries(ticker="AAPL", as_of_date="2026-04-30")
+    assert first != second
+    assert len(rows) == 2
+
+
+def test_decision_journal_artifacts_are_written_and_safe(tmp_path: Path):
+    entry = build_decision_journal_entry(_decision(), "2026-04-30", None)
+    payload = {
+        "schema_version": P41_SCHEMA_VERSION,
+        "as_of_date": "2026-04-30",
+        "created_at": entry["created_at"],
+        "source": "fixture",
+        "status": "completed",
+        "entries": [entry],
+        "summary": {"entry_count": 1, "manual_review_count": 0, "slow_down_count": 1},
+        "warnings": [],
+        "disclaimer": entry["disclaimer"],
+    }
+    paths = write_decision_journal_artifacts(payload, tmp_path / "output" / "governance" / "2026-04-30")
+    text = paths["md"].read_text(encoding="utf-8").lower()
+    assert paths["json"].name == "p41_decision_journal.json"
+    assert "p41 is behavioral guardrail evidence only" in text
+    assert "trade now" not in text
