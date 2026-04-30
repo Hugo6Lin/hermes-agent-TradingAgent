@@ -233,3 +233,57 @@ def test_save_batch_research_requires_non_empty_tickers(tickers):
         assert batch_count == 0
         assert item_count == 0
         assert report_count == 0
+
+
+def test_governance_run_cli_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    app = _load_app_module()
+    config_path = tmp_path / "governance_config.json"
+    config_path.write_text(json.dumps({
+        "version_readiness": {
+            "version_id": "p35-cli",
+            "branch": "codex/quant-governance-p20-p30",
+            "commit": "local-test",
+            "evidence": {
+                "p20_p30_regression_passed": True,
+                "p31_p34_regression_passed": True,
+                "doc_standards_passed": True,
+            },
+            "notes": "P35 CLI test",
+        },
+        "signal_families": [],
+        "expected_artifacts": [],
+        "generation_requests": [],
+        "edge_reviews": [],
+    }), encoding="utf-8")
+
+    result = app.main([
+        "--app-root", str(tmp_path),
+        "governance-run",
+        "--config", str(config_path),
+        "--run-date", "2026-04-30",
+        "--output-root", str(tmp_path / "output" / "governance"),
+    ])
+
+    out = capsys.readouterr().out
+    assert result == 0
+    assert "Governance runtime status:" in out
+    assert "Boss brief status:" in out
+    assert "Output dir:" in out
+
+
+def test_governance_run_cli_invalid_config_returns_nonzero(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    app = _load_app_module()
+    config_path = tmp_path / "broken.json"
+    config_path.write_text("{not-json", encoding="utf-8")
+
+    result = app.main([
+        "--app-root", str(tmp_path),
+        "governance-run",
+        "--config", str(config_path),
+        "--run-date", "2026-04-30",
+        "--output-root", str(tmp_path / "output" / "governance"),
+    ])
+
+    out = capsys.readouterr().out
+    assert result == 2
+    assert "Governance runtime status: blocked_invalid_config" in out
