@@ -114,3 +114,49 @@ def test_write_research_context_prompt_pack_creates_files(tmp_path: Path):
     assert len(artifacts) == 2
     loaded = json.loads((tmp_path / "2026-05-01" / "p48_research_context_prompt_pack.json").read_text())
     assert loaded["prompt_pack_id"] == pack["prompt_pack_id"]
+
+
+# --- P48-B persistence and runtime tests ---
+
+from agent.research_v1.data.database import ResearchDatabase
+from agent.research_v1.research_context_prompt_pack import run_research_context_prompt_pack
+
+
+def test_save_research_context_prompt_pack_is_idempotent(tmp_path: Path):
+    db = ResearchDatabase(str(tmp_path / "test.db"))
+    db.initialize()
+    pack = build_research_context_prompt_pack(
+        as_of_date="2026-05-01",
+        tickers=["AAPL"],
+        roles=["risk"],
+        max_block_chars=1200,
+        source_pack=_source_pack(),
+        created_at="2026-05-01T00:00:00+00:00",
+    )
+    db.save_research_context_prompt_pack(pack)
+    db.save_research_context_prompt_pack(pack)
+    rows = db.list_research_context_prompt_packs(as_of_date="2026-05-01")
+    assert len(rows) == 1
+    assert rows[0]["source_hash"] == pack["source_hash"]
+
+
+def test_run_prompt_pack_loads_p47_artifact_when_db_empty(tmp_path: Path):
+    db = ResearchDatabase(str(tmp_path / "test.db"))
+    db.initialize()
+    governance_root = tmp_path / "governance"
+    day_dir = governance_root / "2026-05-01"
+    day_dir.mkdir(parents=True)
+    (day_dir / "p47_research_context_pack.json").write_text(json.dumps(_source_pack()), encoding="utf-8")
+    result = run_research_context_prompt_pack(db, governance_root, tmp_path / "out", "2026-05-01", ["AAPL"], ["risk"], 1200)
+    assert result["status"] == "prompt_pack_ready"
+    assert result["source_context_pack_id"] == "p47-2026-05-01-source"
+
+
+def test_run_prompt_pack_blocks_when_p47_missing(tmp_path: Path):
+    db = ResearchDatabase(str(tmp_path / "test.db"))
+    db.initialize()
+    governance_root = tmp_path / "governance"
+    governance_root.mkdir()
+    result = run_research_context_prompt_pack(db, governance_root, tmp_path / "out", "2026-05-01", ["AAPL"], ["risk"], 1200)
+    assert result["status"] == "blocked_missing_context"
+    assert not (tmp_path / "out" / "2026-05-01" / "p48_research_context_prompt_pack.json").exists()

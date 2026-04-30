@@ -3479,3 +3479,110 @@ class ResearchDatabase:
             return result
         finally:
             conn.close()
+
+    # --- P48 Research Context Prompt Pack helpers ---
+
+    def initialize_research_context_prompt_pack_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS research_context_prompt_packs (
+                    prompt_pack_id TEXT PRIMARY KEY,
+                    as_of_date TEXT NOT NULL,
+                    tickers_key TEXT NOT NULL,
+                    roles_key TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    source_context_pack_id TEXT NOT NULL,
+                    source_context_hash TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    omitted_context_json TEXT NOT NULL,
+                    warnings_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(as_of_date, tickers_key, roles_key, source_hash)
+                )"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_research_context_prompt_pack(self, pack: dict) -> str:
+        self.initialize_research_context_prompt_pack_schema()
+        tickers_key = "|".join(pack.get("tickers", []))
+        roles_key = "|".join(pack.get("roles", []))
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT OR IGNORE INTO research_context_prompt_packs (
+                    prompt_pack_id, as_of_date, tickers_key, roles_key, status,
+                    source_context_pack_id, source_context_hash, source_hash,
+                    omitted_context_json, warnings_json, payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    pack["prompt_pack_id"],
+                    pack["as_of_date"],
+                    tickers_key,
+                    roles_key,
+                    pack["status"],
+                    pack.get("source_context_pack_id", ""),
+                    pack.get("source_context_hash", ""),
+                    pack["source_hash"],
+                    json.dumps(pack.get("omitted_context", []), sort_keys=True),
+                    json.dumps(pack.get("warnings", []), sort_keys=True),
+                    json.dumps(pack, sort_keys=True, default=str),
+                    pack.get("created_at", ""),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return pack["prompt_pack_id"]
+
+    def list_research_context_prompt_packs(
+        self, *, as_of_date: str | None = None, limit: int = 20
+    ) -> list[dict]:
+        self.initialize_research_context_prompt_pack_schema()
+        conn = self._get_connection()
+        try:
+            if as_of_date:
+                rows = conn.execute(
+                    """SELECT * FROM research_context_prompt_packs
+                       WHERE as_of_date = ?
+                       ORDER BY created_at DESC, prompt_pack_id ASC
+                       LIMIT ?""",
+                    (as_of_date, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM research_context_prompt_packs
+                       ORDER BY as_of_date DESC, created_at DESC, prompt_pack_id ASC
+                       LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_research_context_packs_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_research_context_pack_schema()
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                """SELECT * FROM research_context_packs
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, pack_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            ).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                try:
+                    payload = json.loads(d.get("payload_json", "{}"))
+                    payload.setdefault("pack_id", d.get("pack_id"))
+                    result.append(payload)
+                except (json.JSONDecodeError, TypeError):
+                    result.append(d)
+            return result
+        finally:
+            conn.close()

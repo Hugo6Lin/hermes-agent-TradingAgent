@@ -282,3 +282,70 @@ def write_research_context_prompt_pack(pack: dict[str, Any], output_root: Path) 
     json_path.write_text(json.dumps(pack, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
     md_path.write_text(render_research_context_prompt_pack_markdown(pack), encoding="utf-8")
     return [str(json_path), str(md_path)]
+
+
+def _load_p47_artifact_as_of(governance_root: Path, as_of_date: str, lookback_days: int = 30) -> dict[str, Any] | None:
+    for offset in range(lookback_days + 1):
+        day = (date.fromisoformat(as_of_date) - timedelta(days=offset)).isoformat()
+        path = governance_root / day / "p47_research_context_pack.json"
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                return None
+    return None
+
+
+def load_source_context_pack(db: Any, governance_root: Path, as_of_date: str) -> dict[str, Any] | None:
+    method = getattr(db, "list_research_context_packs_as_of", None)
+    if method:
+        try:
+            rows = method(as_of_date)
+        except Exception:
+            rows = []
+        if rows:
+            return rows[0]
+    return _load_p47_artifact_as_of(Path(governance_root), as_of_date)
+
+
+def run_research_context_prompt_pack(
+    db: Any,
+    governance_root: Path,
+    output_root: Path,
+    as_of_date: str,
+    tickers: list[str],
+    roles: list[str] | None = None,
+    max_block_chars: int = 1200,
+) -> dict[str, Any]:
+    governance_root = Path(governance_root)
+    validation = validate_prompt_pack_inputs(
+        as_of_date,
+        tickers,
+        roles,
+        max_block_chars,
+        governance_root.is_dir() if governance_root.exists() else True,
+    )
+    if validation["status"] == "blocked_invalid_input":
+        return validation
+    source_pack = load_source_context_pack(db, governance_root, as_of_date)
+    if not source_pack:
+        return {
+            "schema_version": P48_SCHEMA_VERSION,
+            "status": "blocked_missing_context",
+            "as_of_date": as_of_date,
+            "tickers": validation["tickers"],
+            "roles": validation["roles"],
+            "warnings": ["missing_p47_research_context_pack"],
+        }
+    pack = build_research_context_prompt_pack(
+        as_of_date=as_of_date,
+        tickers=validation["tickers"],
+        roles=validation["roles"],
+        max_block_chars=max_block_chars,
+        source_pack=source_pack,
+    )
+    artifacts = write_research_context_prompt_pack(pack, Path(output_root))
+    if hasattr(db, "save_research_context_prompt_pack"):
+        db.save_research_context_prompt_pack(pack)
+    pack["artifacts"] = artifacts
+    return pack
