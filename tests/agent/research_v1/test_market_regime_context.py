@@ -107,6 +107,98 @@ def test_sector_rotation_ranks_relative_strength_against_spy():
     assert ranked[-1]["symbol"] == "XLP"
 
 
+# ── P37-A+ regression: middle-row revision changes hash ──────────────────────
+
+def test_data_source_hash_detects_middle_row_revision():
+    """Same endpoints with different middle data must produce different hashes."""
+    base = _history(100.0, days=10, daily_step=1.0)
+    revised = [dict(r) for r in base]
+    # Change a middle row's close: 100,101,...,105->95,...,109
+    revised[5]["close"] = 95.0
+
+    histories_base = {"SPY": base}
+    histories_revised = {"SPY": revised}
+
+    assert compute_data_source_hash(histories_base) != compute_data_source_hash(histories_revised)
+
+
+def test_risk_on_narrow_classification_from_positive_spy_weak_breadth():
+    """Positive SPY with all sectors below SMA20 → risk_on_narrow."""
+    histories = _histories(step=0.1)
+    # Make SPY clearly positive
+    histories["SPY"] = _history(100.0, daily_step=2.0)
+    # Make all sectors flat or slightly negative so breadth is weak
+    for sym in ("XLK", "XLF", "XLY", "XLP", "XLE", "XLV", "XLI", "XLU", "XLB", "XLC", "XLRE"):
+        histories[sym] = _history(100.0, daily_step=-0.5)
+    provider = FakeMarketProvider(histories)
+
+    snapshot = build_market_regime_snapshot(provider, as_of_date=date(2026, 4, 30))
+
+    assert snapshot["regime_label"] == "risk_on_narrow"
+    assert snapshot["classification_reasons"]
+
+
+def test_risk_off_classification_from_negative_spy_weak_breadth_negative_credit():
+    """Negative SPY, weak breadth, negative credit appetite → risk_off."""
+    histories = _histories(step=0.1)
+    # SPY declining
+    histories["SPY"] = _history(200.0, daily_step=-2.0)
+    # Breadth weak: sectors declining
+    for sym in ("XLK", "XLF", "XLY", "XLP", "XLE", "XLV", "XLI", "XLU", "XLB", "XLC", "XLRE"):
+        histories[sym] = _history(100.0, daily_step=-1.5)
+    # Credit appetite negative: HYG < LQD
+    histories["HYG"] = _history(100.0, daily_step=-1.0)
+    histories["LQD"] = _history(100.0, daily_step=0.5)
+    provider = FakeMarketProvider(histories)
+
+    snapshot = build_market_regime_snapshot(provider, as_of_date=date(2026, 4, 30))
+
+    assert snapshot["regime_label"] == "risk_off"
+    assert any("credit" in r.lower() or "breadth" in r.lower() for r in snapshot["classification_reasons"])
+
+
+def test_high_volatility_classification_from_extreme_drawdown():
+    """High realized vol + material drawdown → high_volatility."""
+    # Build a history that crashes: up 30 days, then down sharply
+    rows = []
+    start = date(2026, 1, 1)
+    for idx in range(90):
+        if idx < 30:
+            close = 200.0 + idx * 2.0
+        else:
+            close = 260.0 - (idx - 30) * 4.0  # sharp decline
+        rows.append({
+            "date": str(start + timedelta(days=idx)),
+            "open": close - 0.25,
+            "high": close + 0.50,
+            "low": close - 0.50,
+            "close": close,
+            "volume": 1_000_000,
+            "price_adjustment": "adjusted",
+        })
+    histories = _histories(step=0.1)
+    histories["SPY"] = rows
+    provider = FakeMarketProvider(histories)
+
+    snapshot = build_market_regime_snapshot(provider, as_of_date=date(2026, 4, 30))
+
+    assert snapshot["regime_label"] == "high_volatility"
+
+
+def test_confidence_reduced_by_contradiction_positive_spy_weak_breadth():
+    """Positive SPY with weak breadth reduces confidence via contradiction penalty."""
+    # All proxies flat except SPY → breadth stays below 0.4 threshold
+    histories = {sym: _history(100.0 + i, daily_step=0.0) for i, sym in enumerate(DEFAULT_MARKET_PROXIES)}
+    histories["SPY"] = _history(100.0, daily_step=2.0)
+    provider = FakeMarketProvider(histories)
+
+    snapshot = build_market_regime_snapshot(provider, as_of_date=date(2026, 4, 30))
+
+    # Confidence should be less than coverage_ratio due to contradiction penalty
+    assert snapshot["confidence"] < snapshot["coverage_ratio"]
+    assert any("contradiction" in w.lower() for w in snapshot["warnings"])
+
+
 # ── P37-B persistence and artifact tests ─────────────────────────────────────
 
 from agent.research_v1.data.database import ResearchDatabase
