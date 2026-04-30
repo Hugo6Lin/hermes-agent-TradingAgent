@@ -3101,3 +3101,122 @@ class ResearchDatabase:
             return rows
         finally:
             conn.close()
+
+    def latest_evidence_freshness_drift_report_as_of(self, as_of_date: str) -> dict | None:
+        self.initialize_evidence_freshness_drift_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT report_json FROM evidence_freshness_drift_reports
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC
+                   LIMIT 1""",
+                (as_of_date,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return json.loads(dict(row)["report_json"])
+        finally:
+            conn.close()
+
+    def latest_market_data_readiness_report_as_of(self, as_of_date: str) -> dict | None:
+        self.initialize_market_data_readiness_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT report_json FROM market_data_readiness_reports
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC
+                   LIMIT 1""",
+                (as_of_date,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return json.loads(dict(row)["report_json"])
+        finally:
+            conn.close()
+
+    def initialize_evidence_refresh_plan_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS evidence_refresh_plans (
+                    plan_id TEXT PRIMARY KEY,
+                    schema_version TEXT NOT NULL,
+                    as_of_date TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    lookback_days INTEGER NOT NULL,
+                    max_items INTEGER NOT NULL,
+                    candidate_count INTEGER NOT NULL,
+                    blocked_count INTEGER NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    plan_json TEXT NOT NULL,
+                    UNIQUE(as_of_date, lookback_days, max_items, source_hash)
+                )"""
+            )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_evidence_refresh_plans_as_of_date
+                   ON evidence_refresh_plans(as_of_date)"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_evidence_refresh_plan(self, plan: dict) -> str:
+        self.initialize_evidence_refresh_plan_schema()
+        summary = plan.get("summary", {})
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT OR IGNORE INTO evidence_refresh_plans (
+                    plan_id, schema_version, as_of_date, created_at, status,
+                    lookback_days, max_items, candidate_count, blocked_count,
+                    source_hash, plan_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    plan["plan_id"],
+                    plan["schema_version"],
+                    plan["as_of_date"],
+                    plan.get("created_at", ""),
+                    plan.get("status", ""),
+                    int(plan.get("lookback_days", 0)),
+                    int(plan.get("max_items", 0)),
+                    int(summary.get("candidate_count", 0)),
+                    int(summary.get("blocked_count", 0)),
+                    plan["source_hash"],
+                    json.dumps(plan, sort_keys=True, default=str),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return plan["plan_id"]
+
+    def list_evidence_refresh_plans(
+        self, *, as_of_date: str | None = None, limit: int = 20
+    ) -> list[dict]:
+        self.initialize_evidence_refresh_plan_schema()
+        conn = self._get_connection()
+        try:
+            if as_of_date:
+                cursor = conn.execute(
+                    """SELECT * FROM evidence_refresh_plans
+                       WHERE as_of_date = ?
+                       ORDER BY created_at DESC, plan_id ASC
+                       LIMIT ?""",
+                    (as_of_date, limit),
+                )
+            else:
+                cursor = conn.execute(
+                    """SELECT * FROM evidence_refresh_plans
+                       ORDER BY as_of_date DESC, created_at DESC, plan_id ASC
+                       LIMIT ?""",
+                    (limit,),
+                )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
