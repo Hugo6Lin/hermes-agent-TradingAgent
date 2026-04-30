@@ -3220,3 +3220,212 @@ class ResearchDatabase:
             return [dict(row) for row in rows]
         finally:
             conn.close()
+
+    # --- P47 Research Context Pack helpers ---
+
+    def initialize_research_context_pack_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS research_context_packs (
+                    pack_id TEXT PRIMARY KEY,
+                    as_of_date TEXT NOT NULL,
+                    tickers_key TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    source_refs_json TEXT NOT NULL,
+                    missing_context_json TEXT NOT NULL,
+                    warnings_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(as_of_date, tickers_key, source_hash)
+                )"""
+            )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_research_context_packs_as_of_date
+                   ON research_context_packs(as_of_date)"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_research_context_pack(self, pack: dict) -> str:
+        self.initialize_research_context_pack_schema()
+        tickers_key = "|".join(pack.get("tickers", []))
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT OR IGNORE INTO research_context_packs (
+                    pack_id, as_of_date, tickers_key, status, source_hash,
+                    source_refs_json, missing_context_json, warnings_json,
+                    payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    pack["pack_id"],
+                    pack["as_of_date"],
+                    tickers_key,
+                    pack["status"],
+                    pack["source_hash"],
+                    json.dumps(pack.get("source_refs", []), sort_keys=True),
+                    json.dumps(pack.get("missing_context", []), sort_keys=True),
+                    json.dumps(pack.get("warnings", []), sort_keys=True),
+                    json.dumps(pack, sort_keys=True, default=str),
+                    pack.get("created_at", ""),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return pack["pack_id"]
+
+    def list_research_context_packs(
+        self, *, as_of_date: str | None = None, limit: int = 20
+    ) -> list[dict]:
+        self.initialize_research_context_pack_schema()
+        conn = self._get_connection()
+        try:
+            if as_of_date:
+                cursor = conn.execute(
+                    """SELECT * FROM research_context_packs
+                       WHERE as_of_date = ?
+                       ORDER BY created_at DESC, pack_id ASC
+                       LIMIT ?""",
+                    (as_of_date, limit),
+                )
+            else:
+                cursor = conn.execute(
+                    """SELECT * FROM research_context_packs
+                       ORDER BY as_of_date DESC, created_at DESC, pack_id ASC
+                       LIMIT ?""",
+                    (limit,),
+                )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_evidence_freshness_drift_reports_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_evidence_freshness_drift_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM evidence_freshness_drift_reports
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if "report_json" in d:
+                    try:
+                        d.update(json.loads(d["report_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()
+
+    def list_market_data_readiness_reports_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_market_data_readiness_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM market_data_readiness_reports
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if "report_json" in d:
+                    try:
+                        d.update(json.loads(d["report_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()
+
+    def list_evidence_refresh_plans_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_evidence_refresh_plan_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM evidence_refresh_plans
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, plan_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if "plan_json" in d:
+                    try:
+                        d.update(json.loads(d["plan_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()
+
+    def list_canonical_outcomes_for_ticker(
+        self, ticker: str, as_of_date: str, lookback_days: int, limit: int = 3
+    ) -> list[dict]:
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM canonical_recommendation_outcomes
+                   WHERE ticker = ?
+                     AND evaluated_for_date <= ?
+                     AND evaluated_for_date >= date(?, ?)
+                   ORDER BY evaluated_for_date DESC, created_at DESC
+                   LIMIT ?""",
+                (ticker, as_of_date, as_of_date, f"-{lookback_days} days", limit),
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_research_memory_packs_as_of(self, ticker: str, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_memory_pack_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM research_memory_packs
+                   WHERE ticker = ? AND as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, pack_id ASC
+                   LIMIT ?""",
+                (ticker, as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_decision_journal_entries_as_of(self, ticker: str, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_decision_journal_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM decision_journal_entries
+                   WHERE ticker = ? AND as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, journal_id ASC
+                   LIMIT ?""",
+                (ticker, as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
