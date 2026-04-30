@@ -18,6 +18,7 @@ from agent.research_v1.decision_journal_guardrails import run_decision_journal_g
 from agent.research_v1.boss_copilot_daily_brief import run_boss_copilot_daily_brief
 from agent.research_v1.copilot_console_index import run_copilot_console_index
 from agent.research_v1.evidence_freshness_drift_monitor import run_evidence_freshness_drift_monitor
+from agent.research_v1.evidence_refresh_planner import run_evidence_refresh_planner
 from agent.research_v1.market_data_readiness import run_market_data_readiness
 from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
@@ -654,6 +655,53 @@ def _cmd_market_data_readiness_run(
     return 0
 
 
+def _cmd_evidence_refresh_plan_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    lookback_days: int,
+    max_items: int,
+    governance_root: str,
+    output_root: str,
+) -> int:
+    from datetime import date as _date
+
+    try:
+        _date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid evidence-refresh-plan-run input: invalid date format '{as_of_date}'")
+        return 2
+    if lookback_days <= 0:
+        print("invalid evidence-refresh-plan-run input: lookback-days must be positive")
+        return 2
+    if max_items <= 0:
+        print("invalid evidence-refresh-plan-run input: max-items must be positive")
+        return 2
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    database = _ensure_database(paths)
+    result = run_evidence_refresh_planner(
+        db=database,
+        governance_root=governance_path.resolve(),
+        output_root=output_path.resolve(),
+        as_of_date=as_of_date,
+        lookback_days=lookback_days,
+        max_items=max_items,
+    )
+    if result.get("status") == "blocked_invalid_input":
+        print(f"invalid evidence-refresh-plan-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Evidence refresh plan status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Plan id: {result['plan_id']}")
+    print(f"Candidate count: {result['candidate_count']}")
+    print(f"Blocked count: {result['blocked_count']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -816,6 +864,13 @@ def build_parser() -> argparse.ArgumentParser:
     readiness_parser.add_argument("--live", action="store_true", help="Enable live OpenD quote calls.")
     readiness_parser.add_argument("--output-root", default="output/governance", help="Output root for readiness artifacts.")
 
+    refresh_parser = subparsers.add_parser("evidence-refresh-plan-run", help="Run controlled evidence refresh planner.")
+    refresh_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    refresh_parser.add_argument("--lookback-days", default=14, type=int, help="Number of calendar days to inspect.")
+    refresh_parser.add_argument("--max-items", default=12, type=int, help="Maximum plan items.")
+    refresh_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
+    refresh_parser.add_argument("--output-root", default="output/governance", help="Output root for refresh plan artifacts.")
+
     return parser
 
 
@@ -927,6 +982,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             host=args.host,
             port=args.port,
             live=args.live,
+            output_root=args.output_root,
+        )
+    if args.command == "evidence-refresh-plan-run":
+        return _cmd_evidence_refresh_plan_run(
+            paths,
+            as_of_date=args.as_of_date,
+            lookback_days=args.lookback_days,
+            max_items=args.max_items,
+            governance_root=args.governance_root,
             output_root=args.output_root,
         )
 

@@ -994,3 +994,75 @@ def test_market_data_readiness_run_cli_passes_live_flag(tmp_path, monkeypatch, c
     assert code == 0
     assert captured["live"] is False
     assert captured["symbols"] == ["US.MSFT", "US.GOOGL"]
+
+
+# ── P46 CLI tests ──────────────────────────────────────────────────────
+
+def test_evidence_refresh_plan_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path
+    (app_root / "data").mkdir()
+
+    def fake_run(**kwargs):
+        return {
+            "status": "refresh_plan_ready",
+            "output_dir": str(app_root / "output" / "governance" / "2026-04-30"),
+            "plan_id": "plan1",
+            "candidate_count": 2,
+            "blocked_count": 1,
+            "paths": {},
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_evidence_refresh_planner", fake_run)
+    code = main(["--app-root", str(app_root), "evidence-refresh-plan-run", "--as-of-date", "2026-04-30"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Evidence refresh plan status: refresh_plan_ready" in out
+    assert "Candidate count: 2" in out
+
+
+def test_evidence_refresh_plan_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "evidence-refresh-plan-run", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid evidence-refresh-plan-run input" in capsys.readouterr().out
+
+
+def test_evidence_refresh_plan_cli_rejects_non_positive_max_items(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "evidence-refresh-plan-run", "--as-of-date", "2026-04-30", "--max-items", "0"])
+
+    assert code == 2
+    assert "max-items must be positive" in capsys.readouterr().out
+
+
+def test_evidence_refresh_plan_cli_passes_params(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path
+    (app_root / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured["lookback_days"] = kwargs.get("lookback_days")
+        captured["max_items"] = kwargs.get("max_items")
+        return {
+            "status": "refresh_plan_noop",
+            "output_dir": str(app_root / "output" / "governance" / "2026-04-30"),
+            "plan_id": "plan1",
+            "candidate_count": 0,
+            "blocked_count": 0,
+            "paths": {},
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_evidence_refresh_planner", fake_run)
+    code = main(["--app-root", str(app_root), "evidence-refresh-plan-run", "--as-of-date", "2026-04-30", "--lookback-days", "7", "--max-items", "5"])
+
+    assert code == 0
+    assert captured["lookback_days"] == 7
+    assert captured["max_items"] == 5
