@@ -256,12 +256,17 @@ def collect_research_context_evidence(
     """Collect P36-P46 evidence for context pack assembly."""
     evidence: dict[str, Any] = {"system": {}, "tickers": {ticker: {} for ticker in tickers}}
 
-    # System context from P44, P45, P46
-    for method_name, target_key in (
-        ("list_evidence_freshness_drift_reports_as_of", "evidence_health_status"),
-        ("list_market_data_readiness_reports_as_of", "provider_status"),
-        ("list_evidence_refresh_plans_as_of", "refresh_plan_status"),
-    ):
+    # System context: prefer DB rows at or before as_of_date, fall back to JSON artifacts
+    _system_evidence_specs = [
+        # (db_method, target_key, phase_id, artifact_filename, id_key)
+        ("list_evidence_freshness_drift_reports_as_of", "evidence_health_status", "P44", "p44_evidence_freshness_drift_monitor.json", "report_id"),
+        ("list_market_data_readiness_reports_as_of", "provider_status", "P45", "p45_market_data_readiness.json", "report_id"),
+        ("list_evidence_refresh_plans_as_of", "refresh_plan_status", "P46", "p46_evidence_refresh_plan.json", "plan_id"),
+        ("list_boss_copilot_daily_briefs_as_of", "latest_boss_brief_status", "P42", "p42_boss_copilot_daily_brief.json", "brief_id"),
+        ("list_copilot_console_indexes_as_of", "latest_console_index_status", "P43", "p43_copilot_console_index.json", "index_id"),
+    ]
+    for method_name, target_key, phase_id, artifact_filename, id_key in _system_evidence_specs:
+        populated = False
         method = getattr(db, method_name, None)
         if method:
             rows = _safe_db_call(method, as_of_date)
@@ -269,31 +274,27 @@ def collect_research_context_evidence(
                 row = rows[0]
                 evidence["system"][target_key] = row.get("status")
                 evidence["system"].setdefault("source_refs", []).append({
-                    "phase_id": target_key,
+                    "phase_id": phase_id,
                     "artifact_type": method_name,
-                    "source_id": row.get("report_id") or row.get("plan_id", ""),
+                    "source_id": row.get(id_key, ""),
                     "as_of_date": row.get("as_of_date"),
                     "created_at": row.get("created_at"),
                     "source_hash": row.get("source_hash"),
                 })
-
-    # System context from P42, P43 via artifact fallback
-    for filename, target_key, phase_id in (
-        ("p42_boss_copilot_daily_brief.json", "latest_boss_brief_status", "P42"),
-        ("p43_copilot_console_index.json", "latest_console_index_status", "P43"),
-    ):
-        artifact = _load_artifact_as_of(governance_root, as_of_date, lookback_days, filename)
-        if artifact:
-            evidence["system"][target_key] = artifact.get("status", "unknown")
-            evidence["system"].setdefault("source_refs", []).append({
-                "phase_id": phase_id,
-                "artifact_type": "json_artifact",
-                "source_id": artifact.get("report_id", ""),
-                "as_of_date": artifact.get("as_of_date"),
-                "created_at": artifact.get("created_at"),
-                "source_hash": artifact.get("source_hash"),
-                "path": str(governance_root / artifact.get("as_of_date", "") / filename),
-            })
+                populated = True
+        if not populated:
+            artifact = _load_artifact_as_of(governance_root, as_of_date, lookback_days, artifact_filename)
+            if artifact:
+                evidence["system"][target_key] = artifact.get("status", "unknown")
+                evidence["system"].setdefault("source_refs", []).append({
+                    "phase_id": phase_id,
+                    "artifact_type": "json_artifact",
+                    "source_id": artifact.get("report_id", ""),
+                    "as_of_date": artifact.get("as_of_date"),
+                    "created_at": artifact.get("created_at"),
+                    "source_hash": artifact.get("source_hash"),
+                    "path": str(governance_root / artifact.get("as_of_date", "") / artifact_filename),
+                })
 
     # Ticker context from P37 (market regime - system-wide but relevant per ticker)
     regime_method = getattr(db, "list_market_regime_snapshots_as_of", None)

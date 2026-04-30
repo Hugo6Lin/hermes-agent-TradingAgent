@@ -3429,3 +3429,53 @@ class ResearchDatabase:
             return [dict(row) for row in rows]
         finally:
             conn.close()
+
+    def list_boss_copilot_daily_briefs_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_boss_copilot_brief_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM boss_copilot_daily_briefs
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, brief_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if "brief_json" in d:
+                    try:
+                        d.update(json.loads(d["brief_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()
+
+    def list_copilot_console_indexes_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_copilot_console_index_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM copilot_console_indexes
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, index_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if "index_json" in d:
+                    try:
+                        d.update(json.loads(d["index_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()

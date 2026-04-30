@@ -169,3 +169,62 @@ def test_run_research_context_pack_blocked_invalid_input(tmp_path: Path):
         tickers=["AAPL"],
     )
     assert result["status"] == "blocked_invalid_input"
+
+
+def test_system_context_falls_back_to_p45_artifact_when_db_empty(tmp_path: Path):
+    db = ResearchDatabase(str(tmp_path / "test.db"))
+    db.initialize()
+    governance_root = tmp_path / "governance"
+    governance_root.mkdir()
+    day_dir = governance_root / "2026-05-01"
+    day_dir.mkdir()
+    (day_dir / "p45_market_data_readiness.json").write_text(json.dumps({
+        "schema_version": "p45_market_data_readiness.1",
+        "report_id": "p45-report",
+        "as_of_date": "2026-05-01",
+        "status": "provider_ready",
+        "source_hash": "p45-hash",
+        "recommended_actions": [],
+    }), encoding="utf-8")
+    pack = run_research_context_pack(
+        db=db,
+        governance_root=governance_root,
+        output_root=tmp_path / "output",
+        as_of_date="2026-05-01",
+        tickers=["AAPL"],
+    )
+    assert pack["system_context"].get("provider_status") == "provider_ready"
+
+
+def test_system_context_reads_p42_p43_from_db_without_artifact(tmp_path: Path):
+    db = ResearchDatabase(str(tmp_path / "test.db"))
+    db.initialize()
+    db.save_boss_copilot_daily_brief({
+        "brief_id": "brief-1",
+        "schema_version": "p42_boss_copilot_daily_brief.1",
+        "as_of_date": "2026-05-01",
+        "created_at": "2026-05-01T10:00:00+00:00",
+        "status": "brief_ready",
+        "source_hash": "brief-hash",
+        "brief_json": "{}",
+    })
+    db.save_copilot_console_index({
+        "index_id": "index-1",
+        "schema_version": "p43_copilot_console_index.1",
+        "as_of_date": "2026-05-01",
+        "created_at": "2026-05-01T10:00:00+00:00",
+        "status": "index_ready",
+        "source_hash": "index-hash",
+        "index_json": "{}",
+    })
+    governance_root = tmp_path / "governance"
+    governance_root.mkdir()
+    pack = run_research_context_pack(
+        db=db,
+        governance_root=governance_root,
+        output_root=tmp_path / "output",
+        as_of_date="2026-05-01",
+        tickers=["AAPL"],
+    )
+    assert pack["system_context"].get("latest_boss_brief_status") == "brief_ready"
+    assert pack["system_context"].get("latest_console_index_status") == "index_ready"
