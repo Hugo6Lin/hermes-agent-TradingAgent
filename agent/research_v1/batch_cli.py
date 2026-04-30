@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import date
 from pathlib import Path
 from typing import Sequence
 
 from agent.research_v1.data.database import ResearchDatabase
 from agent.research_v1.data.futu_opend import FutuQuoteClient
 from agent.research_v1.governance_runtime import GovernanceRuntimeRequest, run_governance_runtime
+from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
 from agent.research_v1.report_pdf_legacy import export_batch_pdf
 from agent.research_v1.research_batch_service import save_batch_research
@@ -117,6 +119,44 @@ def _cmd_governance_run(
     return 2 if result.status == "blocked_invalid_config" else 0
 
 
+def _cmd_outcome_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    output_root: str,
+    limit: int,
+    flat_cost_bps: float,
+) -> int:
+    if limit < 0 or flat_cost_bps < 0:
+        print("invalid outcome-run input: limit and flat-cost-bps must be non-negative")
+        return 2
+
+    try:
+        evaluated_date = date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid outcome-run input: invalid date format '{as_of_date}'")
+        return 2
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_recommendation_outcome_tracking(
+        db=database,
+        evaluated_for_date=evaluated_date,
+        limit=limit,
+        flat_cost_bps=flat_cost_bps,
+        output_root=output_path.resolve(),
+    )
+    print(f"Outcome tracking status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Outcome rows written: {result['outcome_rows_written']}")
+    print(f"Duplicate rows skipped: {result['duplicate_rows_skipped']}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -162,6 +202,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum artifact age before registry marks an artifact stale.",
     )
 
+    outcome_parser = subparsers.add_parser("outcome-run", help="Run recommendation outcome tracking.")
+    outcome_parser.add_argument("--as-of-date", required=True, help="Evaluation as-of date YYYY-MM-DD.")
+    outcome_parser.add_argument(
+        "--output-root",
+        default="output/governance",
+        help="Root directory for outcome artifacts.",
+    )
+    outcome_parser.add_argument(
+        "--limit",
+        default=100,
+        type=int,
+        help="Maximum number of signals to evaluate.",
+    )
+    outcome_parser.add_argument(
+        "--flat-cost-bps",
+        default=0.0,
+        type=float,
+        help="Flat round-trip cost in basis points.",
+    )
+
     return parser
 
 
@@ -191,6 +251,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_date=args.run_date,
             output_root=args.output_root,
             freshness_policy_days=args.freshness_policy_days,
+        )
+    if args.command == "outcome-run":
+        return _cmd_outcome_run(
+            paths,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+            limit=args.limit,
+            flat_cost_bps=args.flat_cost_bps,
         )
 
     parser.print_help()

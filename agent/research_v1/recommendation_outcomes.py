@@ -573,6 +573,7 @@ def run_recommendation_outcome_tracking(
     if output_root:
         output_dir = output_root / str(evaluated_for_date)
         write_recommendation_outcome_artifacts(result, output_dir)
+        result["output_dir"] = str(output_dir)
 
     return result
 

@@ -320,3 +320,55 @@ def test_governance_run_cli_default_output_root_uses_app_root(tmp_path: Path, ca
     out = capsys.readouterr().out
     assert result == 0
     assert str(tmp_path / "output" / "governance") in out
+
+
+def test_outcome_run_cli_success_writes_p36_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "p36_recommendation_outcomes.json").write_text("{}", encoding="utf-8")
+        (output_dir / "p36_recommendation_outcomes.md").write_text("# P36", encoding="utf-8")
+        return {
+            "status": "completed",
+            "output_dir": str(output_dir),
+            "outcome_rows_written": 1,
+            "duplicate_rows_skipped": 0,
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_recommendation_outcome_tracking", fake_run)
+
+    code = main([
+        "--app-root", str(app_root),
+        "outcome-run",
+        "--as-of-date", "2026-04-30",
+        "--limit", "10",
+        "--flat-cost-bps", "0",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Outcome tracking status: completed" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_outcome_run_cli_rejects_negative_limit(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    code = main([
+        "--app-root", str(app_root),
+        "outcome-run",
+        "--as-of-date", "2026-04-30",
+        "--limit", "-1",
+    ])
+
+    assert code == 2
+    assert "invalid outcome-run input" in capsys.readouterr().out

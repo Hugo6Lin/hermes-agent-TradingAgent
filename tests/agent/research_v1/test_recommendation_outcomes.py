@@ -364,3 +364,73 @@ def test_calendar_hash_adjustment_cost_and_win_semantics():
     assert outcomes[0]["cost_bps"] == 10.0
     assert outcomes[0]["net_return_pct"] < outcomes[0]["gross_return_pct"]
     assert outcomes[0]["win_definition"] == "target_reached_before_stop"
+
+
+# ── P36-C artifact and hard-boundary tests ───────────────────────────────────
+
+from agent.research_v1.recommendation_outcomes import (
+    P36_ARTIFACT_DISCLAIMER,
+    build_distribution_summary,
+    write_recommendation_outcome_artifacts,
+)
+
+
+def test_distribution_summary_leads_with_central_tendency():
+    outcomes = [
+        {**_outcome_payload("signal_a", "hash_a"), "action": "Buy Stock", "net_return_pct": 0.10, "max_drawdown_pct": -0.02, "win": True},
+        {**_outcome_payload("signal_b", "hash_b"), "action": "Buy Stock", "net_return_pct": -0.04, "max_drawdown_pct": -0.08, "win": False},
+    ]
+
+    summary = build_distribution_summary(outcomes)
+
+    assert summary
+    assert summary[0]["group_type"] in {"action", "rating", "horizon"}
+    assert "median_net_return" in summary[0]
+    assert "p25_net_return" in summary[0]
+    assert "p75_net_return" in summary[0]
+
+
+def test_artifact_writer_outputs_json_and_markdown(tmp_path: Path):
+    report = {
+        "run_date": "2026-04-30",
+        "evaluated_for_date": "2026-04-30",
+        "schema_version": "p36_recommendation_outcome.1",
+        "status": "completed",
+        "signals_considered": 1,
+        "outcome_rows_written": 1,
+        "duplicate_rows_skipped": 0,
+        "evaluated_count": 1,
+        "not_applicable_count": 0,
+        "not_evaluable_count": 0,
+        "insufficient_data_count": 0,
+        "invalid_signal_count": 0,
+        "warnings": [],
+        "distribution_summary": [],
+        "extreme_examples": [],
+        "disclaimer": P36_ARTIFACT_DISCLAIMER,
+    }
+
+    paths = write_recommendation_outcome_artifacts(report, tmp_path / "output" / "governance" / "2026-04-30")
+
+    assert paths["json"].name == "p36_recommendation_outcomes.json"
+    assert paths["md"].name == "p36_recommendation_outcomes.md"
+    assert paths["json"].exists()
+    assert paths["md"].exists()
+    assert "does not approve production adoption" in paths["md"].read_text()
+
+
+def test_p36_hard_boundaries_are_explicit():
+    from agent.research_v1 import recommendation_outcomes as p36
+
+    forbidden_names = {
+        "broker",
+        "order",
+        "scheduler",
+        "notification",
+        "train_model",
+        "run_governance_runtime",
+    }
+    module_names = set(p36.__dict__)
+
+    assert not (forbidden_names & module_names)
+    assert "governance" in p36.P36_ARTIFACT_DISCLAIMER
