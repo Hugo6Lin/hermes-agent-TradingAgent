@@ -93,6 +93,14 @@ ticker and emits a deterministic memory pack. The flow is one-way: memory
 packs do not call `HermesResearchApp.run()`, `final_judge`,
 `JudgeInputPacket`, or broker/order APIs.
 
+#### P41 Decision Journal Guardrails
+
+`decision_journal_guardrails.py` reads explicit boss decision-journal input
+plus read-only P40 memory packs and emits behavioral guardrail evidence.
+The flow is one-way: decision journal entries do not call
+`HermesResearchApp.run()`, `final_judge`, `JudgeInputPacket`, or
+broker/order APIs.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 

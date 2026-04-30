@@ -529,6 +529,30 @@ P40 is research-memory evidence only. It does not call
 `CanonicalReport`, place orders, train models, schedule jobs, or mutate
 P35-P39 evidence.
 
+### P41 Decision Journal Guardrails
+
+```
+agent/research_v1/decision_journal_guardrails.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli decision-journal-run \
+  --input /path/to/decision_journal.json \
+  --as-of-date 2026-04-30 \
+  --output-root output/governance
+```
+
+P41 records boss decision context and emits deterministic behavioral
+guardrail flags (urgency, concentration, drawdown, stale thesis, missing
+evidence). It writes `p41_decision_journal.{json,md}` under
+`output/governance/YYYY-MM-DD/`.
+
+P41 is behavioral guardrail evidence only. It does not block action,
+call `HermesResearchApp.run()`, `final_judge`, place orders, or alter
+recommendations.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -622,6 +646,14 @@ Use Python 3.11:
   -q
 ```
 
+### P41 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_decision_journal_guardrails.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -653,7 +685,7 @@ Recent result:
 60 passed
 ```
 
-### Full P20-P40 Governance Chain
+### Full P20-P41 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -691,6 +723,7 @@ Recent result:
   tests/agent/research_v1/test_fundamental_quality.py \
   tests/agent/research_v1/test_candidate_pool.py \
   tests/agent/research_v1/test_research_memory_pack.py \
+  tests/agent/research_v1/test_decision_journal_guardrails.py \
   -q
 ```
 
