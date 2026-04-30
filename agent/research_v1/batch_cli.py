@@ -17,6 +17,7 @@ from agent.research_v1.research_memory_pack import run_research_memory_pack
 from agent.research_v1.decision_journal_guardrails import run_decision_journal_guardrails
 from agent.research_v1.boss_copilot_daily_brief import run_boss_copilot_daily_brief
 from agent.research_v1.copilot_console_index import run_copilot_console_index
+from agent.research_v1.evidence_freshness_drift_monitor import run_evidence_freshness_drift_monitor
 from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
@@ -551,6 +552,56 @@ def _cmd_copilot_console_index_run(
     return 0
 
 
+def _cmd_evidence_monitor_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    lookback_days: int,
+    freshness_days: int,
+    governance_root: str,
+    output_root: str,
+) -> int:
+    from datetime import date as _date
+
+    try:
+        _date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid evidence-monitor-run input: invalid date format '{as_of_date}'")
+        return 2
+    if lookback_days <= 0:
+        print("invalid evidence-monitor-run input: lookback-days must be positive")
+        return 2
+    if freshness_days <= 0:
+        print("invalid evidence-monitor-run input: freshness-days must be positive")
+        return 2
+
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_evidence_freshness_drift_monitor(
+        db=database,
+        governance_root=governance_path.resolve(),
+        output_root=output_path.resolve(),
+        as_of_date=as_of_date,
+        lookback_days=lookback_days,
+        freshness_days=freshness_days,
+    )
+    if result.get("status") == "blocked_invalid_input":
+        print(f"invalid evidence-monitor-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Evidence monitor status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Phase count: {result['phase_count']}")
+    print(f"Red count: {result['red_count']}")
+    print(f"Yellow count: {result['yellow_count']}")
+    print(f"Missing context pattern count: {result['missing_context_pattern_count']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -696,6 +747,13 @@ def build_parser() -> argparse.ArgumentParser:
     console_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
     console_parser.add_argument("--output-root", default="output/governance", help="Output root for console index artifacts.")
 
+    monitor_parser = subparsers.add_parser("evidence-monitor-run", help="Run evidence freshness and drift monitor.")
+    monitor_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    monitor_parser.add_argument("--lookback-days", default=14, type=int, help="Number of calendar days to inspect.")
+    monitor_parser.add_argument("--freshness-days", default=3, type=int, help="Freshness threshold in calendar days.")
+    monitor_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
+    monitor_parser.add_argument("--output-root", default="output/governance", help="Output root for evidence monitor artifacts.")
+
     return parser
 
 
@@ -785,6 +843,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             paths,
             as_of_date=args.as_of_date,
             lookback_days=args.lookback_days,
+            governance_root=args.governance_root,
+            output_root=args.output_root,
+        )
+    if args.command == "evidence-monitor-run":
+        return _cmd_evidence_monitor_run(
+            paths,
+            as_of_date=args.as_of_date,
+            lookback_days=args.lookback_days,
+            freshness_days=args.freshness_days,
             governance_root=args.governance_root,
             output_root=args.output_root,
         )

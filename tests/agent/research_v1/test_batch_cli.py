@@ -847,3 +847,57 @@ def test_copilot_console_index_run_cli_rejects_non_positive_lookback(tmp_path, c
 
     assert code == 2
     assert "lookback-days must be positive" in capsys.readouterr().out
+
+
+# ── P44 Evidence Monitor CLI tests ──────────────────────────────────────
+
+def test_evidence_monitor_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "monitor_yellow",
+            "output_dir": str(output_dir),
+            "phase_count": 8,
+            "red_count": 0,
+            "yellow_count": 1,
+            "missing_context_pattern_count": 2,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_evidence_freshness_drift_monitor", fake_run)
+    code = main(["--app-root", str(app_root), "evidence-monitor-run", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Evidence monitor status: monitor_yellow" in out
+
+
+def test_evidence_monitor_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "evidence-monitor-run", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid evidence-monitor-run input" in capsys.readouterr().out
+
+
+def test_evidence_monitor_run_cli_rejects_non_positive_lookback(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "evidence-monitor-run", "--as-of-date", "2026-04-30", "--lookback-days", "0"])
+
+    assert code == 2
+    assert "lookback-days must be positive" in capsys.readouterr().out
+
+
+def test_evidence_monitor_run_cli_rejects_non_positive_freshness(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "evidence-monitor-run", "--as-of-date", "2026-04-30", "--freshness-days", "0"])
+
+    assert code == 2
+    assert "freshness-days must be positive" in capsys.readouterr().out
