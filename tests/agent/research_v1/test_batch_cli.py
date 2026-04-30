@@ -901,3 +901,96 @@ def test_evidence_monitor_run_cli_rejects_non_positive_freshness(tmp_path, capsy
 
     assert code == 2
     assert "freshness-days must be positive" in capsys.readouterr().out
+
+
+# ── P45 CLI tests ──────────────────────────────────────────────────────
+
+def test_market_data_readiness_run_cli_success(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    def fake_run(**kwargs):
+        output_dir = Path(kwargs["output_root"]) / kwargs["as_of_date"]
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "provider_ready",
+            "output_dir": str(output_dir),
+            "report_id": "abc123",
+            "source_hash": "def456",
+            "recommended_actions": [],
+            "paths": {},
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_data_readiness", fake_run)
+    code = main(["--app-root", str(app_root), "market-data-readiness-run", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Market data readiness status: provider_ready" in out
+
+
+def test_market_data_readiness_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "market-data-readiness-run", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid market-data-readiness-run input" in capsys.readouterr().out
+
+
+def test_market_data_readiness_run_cli_returns_3_for_unavailable(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    def fake_run(**kwargs):
+        output_dir = Path(kwargs["output_root"]) / kwargs["as_of_date"]
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "provider_unavailable",
+            "output_dir": str(output_dir),
+            "report_id": "abc123",
+            "source_hash": "def456",
+            "recommended_actions": ["install_futu_api_sdk"],
+            "paths": {},
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_data_readiness", fake_run)
+    code = main(["--app-root", str(app_root), "market-data-readiness-run", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 3
+    assert "provider_unavailable" in out
+    assert "install_futu_api_sdk" in out
+
+
+def test_market_data_readiness_run_cli_passes_live_flag(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured["live"] = kwargs.get("live")
+        captured["symbols"] = kwargs.get("symbols")
+        output_dir = Path(kwargs["output_root"]) / kwargs["as_of_date"]
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "provider_not_tested_live",
+            "output_dir": str(output_dir),
+            "report_id": "abc123",
+            "source_hash": "def456",
+            "recommended_actions": [],
+            "paths": {},
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_data_readiness", fake_run)
+    code = main(["--app-root", str(app_root), "market-data-readiness-run", "--as-of-date", "2026-04-30", "--symbols", "US.MSFT,US.GOOGL"])
+
+    assert code == 0
+    assert captured["live"] is False
+    assert captured["symbols"] == ["US.MSFT", "US.GOOGL"]

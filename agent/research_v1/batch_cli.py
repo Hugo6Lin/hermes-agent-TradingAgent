@@ -18,6 +18,7 @@ from agent.research_v1.decision_journal_guardrails import run_decision_journal_g
 from agent.research_v1.boss_copilot_daily_brief import run_boss_copilot_daily_brief
 from agent.research_v1.copilot_console_index import run_copilot_console_index
 from agent.research_v1.evidence_freshness_drift_monitor import run_evidence_freshness_drift_monitor
+from agent.research_v1.market_data_readiness import run_market_data_readiness
 from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
@@ -602,6 +603,57 @@ def _cmd_evidence_monitor_run(
     return 0
 
 
+def _cmd_market_data_readiness_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    symbols: str,
+    history_days: int,
+    option_symbol: str,
+    host: str,
+    port: int,
+    live: bool,
+    output_root: str,
+) -> int:
+    import os
+
+    symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    opt_sym = option_symbol if option_symbol else ""
+    effective_host = os.environ.get("FUTU_OPEND_HOST", host)
+    try:
+        effective_port = int(os.environ.get("FUTU_OPEND_PORT", str(port)))
+    except ValueError:
+        effective_port = port
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_market_data_readiness(
+        output_root=output_path.resolve(),
+        as_of_date=as_of_date,
+        host=effective_host,
+        port=effective_port,
+        symbols=symbol_list,
+        history_days=history_days,
+        option_symbol=opt_sym,
+        live=live,
+        db=database,
+    )
+    if result.get("status") == "blocked_invalid_input":
+        warnings = result.get("warnings", ["unknown"])
+        print(f"invalid market-data-readiness-run input: {warnings[0]}")
+        return 2
+    print(f"Market data readiness status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    if result.get("recommended_actions"):
+        for action in result["recommended_actions"]:
+            print(f"  recommended: {action}")
+    if result["status"] == "provider_unavailable":
+        return 3
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -754,6 +806,16 @@ def build_parser() -> argparse.ArgumentParser:
     monitor_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
     monitor_parser.add_argument("--output-root", default="output/governance", help="Output root for evidence monitor artifacts.")
 
+    readiness_parser = subparsers.add_parser("market-data-readiness-run", help="Run Futu market-data provider readiness check.")
+    readiness_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    readiness_parser.add_argument("--symbols", default="US.AAPL,HK.00700", help="Comma-separated symbols.")
+    readiness_parser.add_argument("--history-days", default=30, type=int, help="History lookback in days.")
+    readiness_parser.add_argument("--option-symbol", default="US.AAPL", help="Option chain symbol; empty string to skip.")
+    readiness_parser.add_argument("--host", default="127.0.0.1", help="OpenD host.")
+    readiness_parser.add_argument("--port", default=11111, type=int, help="OpenD port.")
+    readiness_parser.add_argument("--live", action="store_true", help="Enable live OpenD quote calls.")
+    readiness_parser.add_argument("--output-root", default="output/governance", help="Output root for readiness artifacts.")
+
     return parser
 
 
@@ -853,6 +915,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             lookback_days=args.lookback_days,
             freshness_days=args.freshness_days,
             governance_root=args.governance_root,
+            output_root=args.output_root,
+        )
+    if args.command == "market-data-readiness-run":
+        return _cmd_market_data_readiness_run(
+            paths,
+            as_of_date=args.as_of_date,
+            symbols=args.symbols,
+            history_days=args.history_days,
+            option_symbol=args.option_symbol,
+            host=args.host,
+            port=args.port,
+            live=args.live,
             output_root=args.output_root,
         )
 
