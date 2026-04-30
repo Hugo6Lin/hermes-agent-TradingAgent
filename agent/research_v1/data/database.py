@@ -1229,11 +1229,11 @@ class ResearchDatabase:
             conn.close()
 
     def list_canonical_signals(self, limit: int = 20) -> list[dict]:
-        """List canonical signals ordered by newest first."""
+        """List canonical signals ordered by newest first with signal_id tie-breaker."""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM canonical_signals ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM canonical_signals ORDER BY created_at DESC, signal_id LIMIT ?",
             (limit,),
         )
         rows = cursor.fetchall()

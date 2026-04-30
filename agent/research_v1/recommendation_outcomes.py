@@ -97,7 +97,10 @@ def resolve_signal_action(db: Any, task_id: str) -> str | None:
         return None
     reports.sort(key=lambda r: (r.get("created_at", ""), r.get("report_id", "")))
     latest = reports[-1]
-    for field in ("decision_card_json", "instrument_rec_json"):
+    # DB deserializes decision_card_json -> decision_card and
+    # instrument_rec_json -> instrument_rec.  Check both deserialized
+    # keys and raw JSON keys so resolution works regardless of source.
+    for field in ("decision_card", "instrument_rec", "decision_card_json", "instrument_rec_json"):
         obj = latest.get(field)
         if isinstance(obj, str):
             try:
@@ -235,10 +238,9 @@ def evaluate_recommendation_signal(
         path_rows = rows[entry_index:exit_index + 1]
         max_dd = _compute_max_drawdown(path_rows, ep, has_ohlc)
 
-        target_reached, stop_breached = _check_target_stop(
+        target_reached, stop_breached, target_before_stop = _check_target_stop(
             path_rows, ep, stop_loss, take_profit,
         )
-        target_before_stop = target_reached and not stop_breached
 
         if stop_loss is not None and take_profit is not None:
             win = target_before_stop
@@ -289,7 +291,7 @@ def _find_entry_index(rows: list[dict], created_at: str) -> int | None:
         return None
     signal_date = created_at[:10]
     for i, row in enumerate(rows):
-        if row["date"] >= signal_date:
+        if row["date"] > signal_date:
             return i
     return None
 
@@ -321,17 +323,27 @@ def _check_target_stop(
     entry_price: float,
     stop_loss: float | None,
     take_profit: float | None,
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, bool]:
+    """Scan path rows and return (target_reached, stop_breached, target_before_stop).
+
+    The first event wins: if the target is hit on a row before any stop breach,
+    ``target_before_stop`` is True even if a later row breaches the stop.
+    """
     target_reached = False
     stop_breached = False
+    target_before_stop = False
     for row in path_rows:
         high = row.get("high") or row.get("close")
         low = row.get("low") or row.get("close")
-        if take_profit is not None and high is not None and high >= take_profit:
+        hit_target = take_profit is not None and high is not None and high >= take_profit
+        hit_stop = stop_loss is not None and low is not None and low <= stop_loss
+        if hit_target and not target_reached and not stop_breached:
+            target_before_stop = True
+        if hit_target:
             target_reached = True
-        if stop_loss is not None and low is not None and low <= stop_loss:
+        if hit_stop:
             stop_breached = True
-    return target_reached, stop_breached
+    return target_reached, stop_breached, target_before_stop
 
 
 def _make_outcome_row(
@@ -385,6 +397,11 @@ def _emit_all_horizons(
     evaluated_for_date, evaluated_at, flat_cost_bps,
 ) -> list[dict]:
     cost_basis = COST_BASIS_FLAT_BPS if flat_cost_bps > 0 else COST_BASIS_NONE
+    # Deterministic hash so non-evaluated rows satisfy the natural-key
+    # UNIQUE constraint and can be persisted.
+    status_hash = hashlib.sha256(
+        f"status:{status}".encode("utf-8")
+    ).hexdigest()
     return [
         {
             "schema_version": P36_SCHEMA_VERSION,
@@ -415,7 +432,7 @@ def _emit_all_horizons(
             "cost_bps": flat_cost_bps,
             "data_source": "",
             "price_adjustment": PRICE_ADJUSTMENT_UNKNOWN,
-            "data_source_hash": "",
+            "data_source_hash": status_hash,
             "path_precision": PATH_PRECISION_CLOSE_ONLY,
             "evaluated_for_date": str(evaluated_for_date),
             "evaluated_at": evaluated_at,
@@ -501,6 +518,7 @@ def run_recommendation_outcome_tracking(
     limit: int = 50,
     flat_cost_bps: float = 0.0,
     output_root: Path | None = None,
+    provider: Any | None = None,
 ) -> dict[str, Any]:
     db.initialize_canonical_outcome_schema()
     signals = db.list_canonical_signals(limit=limit)
@@ -521,10 +539,11 @@ def run_recommendation_outcome_tracking(
         if action is None:
             action = None
 
+        sig_provider = provider or _DbProvider(db, sig["ticker"])
         outcomes = evaluate_recommendation_signal(
             signal=sig,
             action=action,
-            provider=_DbProvider(db, sig["ticker"]),
+            provider=sig_provider,
             evaluated_for_date=evaluated_for_date,
             flat_cost_bps=flat_cost_bps,
         )
@@ -537,12 +556,11 @@ def run_recommendation_outcome_tracking(
                 and e["data_source_hash"] == row["data_source_hash"]
                 for e in existing
             )
-            if dup and row["data_source_hash"]:
+            if dup:
                 total_skipped += 1
             else:
-                if row["data_source_hash"]:
-                    db.save_canonical_outcome(row)
-                    total_written += 1
+                db.save_canonical_outcome(row)
+                total_written += 1
             counts[row["status"]] = counts.get(row["status"], 0) + 1
             all_outcomes.append(row)
 
@@ -630,13 +648,14 @@ def write_recommendation_outcome_artifacts(
         md_lines.append("| Group Type | Group | Sample Size | Hit Rate | Median Net Return | P25 | P75 | Mean Win | Mean Loss | Avg Drawdown |")
         md_lines.append("|---|---|---|---|---|---|---|---|---|---|")
         for g in report["distribution_summary"]:
+            mw = f"{g['mean_win']:.4f}" if g.get('mean_win') is not None else "N/A"
+            ml = f"{g['mean_loss']:.4f}" if g.get('mean_loss') is not None else "N/A"
+            ad = f"{g['average_drawdown']:.4f}" if g.get('average_drawdown') is not None else "N/A"
             md_lines.append(
                 f"| {g['group_type']} | {g['group']} | {g['sample_size']} | "
                 f"{g['hit_rate']:.2%} | {g['median_net_return']:.4f} | "
                 f"{g['p25_net_return']:.4f} | {g['p75_net_return']:.4f} | "
-                f"{g.get('mean_win'):.4f if g.get('mean_win') is not None else 'N/A'} | "
-                f"{g.get('mean_loss'):.4f if g.get('mean_loss') is not None else 'N/A'} | "
-                f"{g.get('average_drawdown'):.4f if g.get('average_drawdown') is not None else 'N/A'} |"
+                f"{mw} | {ml} | {ad} |"
             )
         md_lines.append("")
 

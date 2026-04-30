@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent.research_v1.contracts import CanonicalSignal, ResearchMode, ResearchTask
+from agent.research_v1.contracts import CanonicalReport, CanonicalSignal, ResearchMode, ResearchTask
 from agent.research_v1.data.database import ResearchDatabase
 
 
@@ -44,6 +44,30 @@ def _seed_signal(db: ResearchDatabase) -> str:
     signal = _signal()
     db.save_research_task(task)
     return db.save_canonical_signal(signal, task.task_id)
+
+
+def _seed_report_with_decision_card(db: ResearchDatabase, primary_action: str = "Buy Stock") -> None:
+    """Seed a canonical report whose deserialized decision_card has primary_action."""
+    from agent.research_v1.contracts import CanonicalReport
+    task = _task()
+    db.save_research_task(task)
+    report = CanonicalReport(
+        title="AAPL report",
+        executive_summary="summary",
+        bottom_line="line",
+        why_now="now",
+        bull_case="bull",
+        bear_case="bear",
+        trade_plan=None,
+        risk_watch=[],
+        key_evidence=[],
+        appendix={},
+        decision_card={"primary_action": primary_action, "confidence": 0.9},
+        instrument_rec=None,
+        options_structure=None,
+        early_exit=None,
+    )
+    db.save_canonical_report(report, task.task_id, "AAPL")
 
 
 def _outcome_payload(signal_id: str, data_hash: str = "hash_a") -> dict:
@@ -139,10 +163,15 @@ def test_canonical_outcome_summaries_group_by_action_rating_ticker_and_horizon(t
 from datetime import date
 
 from agent.research_v1.recommendation_outcomes import (
+    P36_ARTIFACT_DISCLAIMER,
+    build_distribution_summary,
     compute_data_source_hash,
     evaluate_recommendation_signal,
     normalize_price_rows,
     resolve_calendar,
+    resolve_signal_action,
+    run_recommendation_outcome_tracking,
+    write_recommendation_outcome_artifacts,
 )
 
 
@@ -192,7 +221,8 @@ def test_buy_stock_evaluates_default_horizons_with_ohlc_data():
     assert [row["horizon_days"] for row in outcomes] == [5, 20, 60]
     assert all(row["status"] == "evaluated" for row in outcomes)
     assert outcomes[0]["entry_rule"] == "next_open"
-    assert outcomes[0]["entry_price"] == 100.0
+    # Entry is next trading day after signal date (2026-04-01 signal -> 2026-04-02 open)
+    assert outcomes[0]["entry_price"] == 101.0
     assert outcomes[0]["path_precision"] == "ohlc"
 
 
@@ -295,7 +325,8 @@ def test_missing_action_or_entry_price_is_invalid_signal():
 
 def test_missing_next_open_or_horizon_row_is_insufficient_data():
     no_open_rows = _rows()
-    no_open_rows[0] = {**no_open_rows[0], "open": None}
+    # Entry is next trading day (> signal date), so set open=None on row 1
+    no_open_rows[1] = {**no_open_rows[1], "open": None}
     no_open = evaluate_recommendation_signal(
         signal={
             "signal_id": "signal_no_open",
@@ -329,6 +360,196 @@ def test_missing_next_open_or_horizon_row_is_insufficient_data():
 
     assert {row["status"] for row in no_open} == {"insufficient_data"}
     assert any(row["horizon_days"] == 20 and row["status"] == "insufficient_data" for row in short_history)
+
+
+def test_resolve_signal_action_reads_deserialized_decision_card(tmp_path: Path):
+    """P1-1: get_canonical_reports_by_task deserializes decision_card_json into
+    decision_card. resolve_signal_action must read the deserialized key."""
+    db = _db(tmp_path)
+    _seed_report_with_decision_card(db, primary_action="Buy Call")
+    action = resolve_signal_action(db, "task_p36_aapl")
+    assert action == "Buy Call"
+
+
+def test_resolve_signal_action_reads_instrument_rec_when_no_decision_card(tmp_path: Path):
+    """P1-1b: Falls back to instrument_rec when decision_card has no primary_action."""
+    db = _db(tmp_path)
+    task = _task()
+    db.save_research_task(task)
+    report = CanonicalReport(
+        title="AAPL fallback",
+        executive_summary="summary",
+        bottom_line="line",
+        why_now="now",
+        bull_case="bull",
+        bear_case="bear",
+        trade_plan=None,
+        risk_watch=[],
+        key_evidence=[],
+        appendix={},
+        decision_card=None,
+        instrument_rec={"primary_action": "Sell Cash-Secured Put"},
+        options_structure=None,
+        early_exit=None,
+    )
+    db.save_canonical_report(report, task.task_id, "AAPL")
+    action = resolve_signal_action(db, "task_p36_aapl")
+    assert action == "Sell Cash-Secured Put"
+
+
+def test_run_outcome_tracking_uses_injected_provider(tmp_path: Path):
+    """P1-2: run_recommendation_outcome_tracking must accept an injectable
+    provider and use it for history fetching."""
+    db = _db(tmp_path)
+    task = _task()
+    signal = _signal()
+    db.save_research_task(task)
+    db.save_canonical_signal(signal, task.task_id)
+    _seed_report_with_decision_card(db, primary_action="Buy Stock")
+
+    provider = FakeHistoryProvider(_rows())
+    result = run_recommendation_outcome_tracking(
+        db=db,
+        evaluated_for_date=date(2026, 4, 30),
+        limit=10,
+        provider=provider,
+    )
+
+    # With 70 rows and entry at next day, horizons 5 and 20 are evaluated;
+    # horizon 60 may be insufficient_data depending on available rows.
+    assert result["evaluated_count"] > 0
+
+
+def test_next_open_enters_after_signal_date():
+    """P1-3: Entry must be the first trading row AFTER the signal date,
+    not the signal day itself (which may have already closed)."""
+    rows = _rows(start=100.0, count=70)
+    # Signal created on 2026-04-01. The first row is also 2026-04-01.
+    # Entry should be at 2026-04-02 (the next trading row), not 2026-04-01.
+    outcomes = evaluate_recommendation_signal(
+        signal={
+            "signal_id": "signal_next_open",
+            "task_id": "task_next_open",
+            "ticker": "AAPL",
+            "rating": "BUY",
+            "entry_price": 100.0,
+            "stop_loss": None,
+            "take_profit": None,
+            "created_at": "2026-04-01T20:00:00Z",
+        },
+        action="Buy Stock",
+        provider=FakeHistoryProvider(rows),
+        evaluated_for_date=date(2026, 4, 30),
+    )
+    # Entry should be at 2026-04-02 open (101.0), not 2026-04-01 open (100.0)
+    assert outcomes[0]["entry_date"] == "2026-04-02"
+    assert outcomes[0]["entry_price"] == 101.0
+
+
+def test_target_before_stop_respects_event_order():
+    """P1-4: If target is reached before stop is breached, it's a win."""
+    # Use enough rows so price reaches target (> signal date entry at row 1).
+    # With count=25, entry at row 1 (open=101), horizon 5 exit at row 6
+    # (close=107), path max high at row 6 is 108. Need count>=15 so that
+    # within the 5-day path the high exceeds target 110.
+    # Actually use count=25 and check horizon 5 path: rows 1-6 have highs
+    # 103,104,105,106,107,108.  Target 110 not reached.  So use a lower
+    # target or more rows.
+    rows = _rows(start=100.0, count=25)
+    outcomes = evaluate_recommendation_signal(
+        signal={
+            "signal_id": "signal_order",
+            "task_id": "task_order",
+            "ticker": "AAPL",
+            "rating": "BUY",
+            "entry_price": 100.0,
+            "stop_loss": 95.0,
+            "take_profit": 105.0,
+            "created_at": "2026-04-01T20:00:00Z",
+        },
+        action="Buy Stock",
+        provider=FakeHistoryProvider(rows),
+        evaluated_for_date=date(2026, 4, 30),
+    )
+    # Entry at row 1 (open=101). Path highs: 103,104,105 -> target 105
+    # reached at row 3 high=105.  Stop 95 never breached (lowest low=99).
+    assert outcomes[0]["target_reached"] is True
+    assert outcomes[0]["win"] is True
+    assert outcomes[0]["target_reached_before_stop"] is True
+
+
+def test_non_evaluated_outcome_rows_are_persisted(tmp_path: Path):
+    """P2-1: Rows with not_applicable/not_evaluable/invalid_signal status
+    must be persisted with a deterministic status-based hash."""
+    db = _db(tmp_path)
+    signal_id = _seed_signal(db)
+    task = _task()
+    db.save_research_task(task)
+
+    # Seed a report with an action that maps to not_applicable
+    report = CanonicalReport(
+        title="AAPL watchlist",
+        executive_summary="summary",
+        bottom_line="line",
+        why_now="now",
+        bull_case="bull",
+        bear_case="bear",
+        trade_plan=None,
+        risk_watch=[],
+        key_evidence=[],
+        appendix={},
+        decision_card={"primary_action": "Watchlist"},
+        instrument_rec=None,
+        options_structure=None,
+        early_exit=None,
+    )
+    db.save_canonical_report(report, task.task_id, "AAPL")
+
+    result = run_recommendation_outcome_tracking(
+        db=db,
+        evaluated_for_date=date(2026, 4, 30),
+        limit=10,
+    )
+
+    # not_applicable rows should be persisted, not just counted
+    assert result["not_applicable_count"] > 0
+    rows = db.list_canonical_outcomes_by_signal(signal_id)
+    assert any(r["status"] == "not_applicable" for r in rows)
+
+
+def test_artifact_writer_handles_distribution_summary_with_mean_values(tmp_path: Path):
+    """P2-2: Markdown writer must not crash when distribution rows have
+    non-None mean_win/mean_loss values."""
+    outcomes = [
+        {**_outcome_payload("signal_a", "hash_a"), "action": "Buy Stock", "net_return_pct": 0.10, "max_drawdown_pct": -0.02, "win": True},
+        {**_outcome_payload("signal_b", "hash_b"), "action": "Buy Stock", "net_return_pct": -0.04, "max_drawdown_pct": -0.08, "win": False},
+        {**_outcome_payload("signal_c", "hash_c"), "action": "Buy Stock", "net_return_pct": 0.06, "max_drawdown_pct": -0.03, "win": True},
+    ]
+    summary = build_distribution_summary(outcomes)
+
+    report = {
+        "run_date": "2026-04-30",
+        "evaluated_for_date": "2026-04-30",
+        "schema_version": "p36_recommendation_outcome.1",
+        "status": "completed",
+        "signals_considered": 3,
+        "outcome_rows_written": 3,
+        "duplicate_rows_skipped": 0,
+        "evaluated_count": 3,
+        "not_applicable_count": 0,
+        "not_evaluable_count": 0,
+        "insufficient_data_count": 0,
+        "invalid_signal_count": 0,
+        "warnings": [],
+        "distribution_summary": summary,
+        "extreme_examples": {"largest_positive": [], "largest_negative": []},
+        "disclaimer": P36_ARTIFACT_DISCLAIMER,
+    }
+
+    paths = write_recommendation_outcome_artifacts(report, tmp_path / "out")
+    md_text = paths["md"].read_text()
+    assert "Buy Stock" in md_text
+    assert "Distribution Summary" in md_text
 
 
 def test_calendar_hash_adjustment_cost_and_win_semantics():
@@ -367,12 +588,6 @@ def test_calendar_hash_adjustment_cost_and_win_semantics():
 
 
 # ── P36-C artifact and hard-boundary tests ───────────────────────────────────
-
-from agent.research_v1.recommendation_outcomes import (
-    P36_ARTIFACT_DISCLAIMER,
-    build_distribution_summary,
-    write_recommendation_outcome_artifacts,
-)
 
 
 def test_distribution_summary_leads_with_central_tendency():
