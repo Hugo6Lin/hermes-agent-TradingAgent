@@ -57,3 +57,57 @@ def test_markdown_boss_summary_comes_before_technical_appendix():
     md = render_boss_preview_markdown(report)
     assert md.index("## Plain-English Verdict") < md.index("## Technical Appendix")
     assert "sample_data_used" in md
+
+
+# --- P49-B: sample builders and runtime tests ---
+
+from agent.research_v1.boss_preview_runner import (
+    build_preview_fundamental_input,
+    build_preview_candidate_input,
+    run_boss_preview,
+)
+from agent.research_v1.data.database import ResearchDatabase
+
+
+def test_preview_fundamental_input_has_required_rows():
+    payload = build_preview_fundamental_input(["NVDA"], "2026-05-01")
+    assert payload["_preview_sample"] is True
+    assert len(payload["tickers"][0]["rows"]) == 5
+    assert "shares_outstanding" in payload["tickers"][0]["rows"][-1]
+
+
+def test_preview_candidate_input_has_required_fields():
+    payload = build_preview_candidate_input(["NVDA"], "2026-05-01")
+    row = payload["tickers"][0]
+    for key in ("close", "close_20d_ago", "high_252d", "avg_dollar_volume_20d", "realized_vol_20d"):
+        assert key in row
+
+
+def test_run_boss_preview_writes_boss_report_with_fake_phase_runners(tmp_path: Path):
+    db = ResearchDatabase(str(tmp_path / "test.db"))
+    db.initialize()
+    result = run_boss_preview(
+        db=db,
+        tickers=["NVDA"],
+        as_of_date="2026-05-01",
+        output_root=tmp_path / "output" / "governance",
+        governance_root=tmp_path / "output" / "governance",
+        live=False,
+        max_candidates=3,
+        phase_runners={
+            "P45": lambda **kw: {"status": "provider_not_tested_live", "paths": {}, "warnings": []},
+            "P37": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P38": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P39": lambda **kw: {"status": "completed", "top_candidate": "NVDA", "candidate_count": 1, "paths": {}, "warnings": []},
+            "P40": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P41": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P42": lambda **kw: {"status": "brief_ready", "paths": {"md": tmp_path / "p42.md"}, "warnings": []},
+            "P43": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P44": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P46": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P47": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P48": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+        },
+    )
+    assert result["status"] in {"boss_preview_ready", "boss_preview_limited"}
+    assert (tmp_path / "output" / "governance" / "2026-05-01" / "boss_preview.md").exists()
