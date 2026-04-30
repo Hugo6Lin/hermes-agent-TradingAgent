@@ -1066,3 +1066,74 @@ def test_evidence_refresh_plan_cli_passes_params(monkeypatch, tmp_path, capsys):
     assert code == 0
     assert captured["lookback_days"] == 7
     assert captured["max_items"] == 5
+
+
+def test_research_context_pack_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path
+    (app_root / "data").mkdir()
+
+    def fake_run(**kwargs):
+        return {
+            "status": "context_pack_ready",
+            "pack_id": "p47-2026-05-01-abc123def456",
+            "tickers": ["AAPL", "MSFT"],
+            "missing_context": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_research_context_pack", fake_run)
+    code = main(["--app-root", str(app_root), "research-context-pack-run", "--as-of-date", "2026-05-01", "--tickers", "AAPL,MSFT"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Research context pack status: context_pack_ready" in out
+    assert "Pack id: p47-2026-05-01-abc123def456" in out
+    assert "Tickers: AAPL, MSFT" in out
+
+
+def test_research_context_pack_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "research-context-pack-run", "--as-of-date", "bad-date", "--tickers", "AAPL"])
+
+    assert code == 2
+    assert "invalid research-context-pack-run input" in capsys.readouterr().out
+
+
+def test_research_context_pack_cli_rejects_negative_lookback(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "research-context-pack-run", "--as-of-date", "2026-05-01", "--tickers", "AAPL", "--lookback-days", "0"])
+
+    assert code == 2
+    assert "lookback-days must be positive" in capsys.readouterr().out
+
+
+def test_research_context_pack_cli_passes_params(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path
+    (app_root / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured["tickers"] = kwargs.get("tickers")
+        captured["lookback_days"] = kwargs.get("lookback_days")
+        captured["max_items_per_ticker"] = kwargs.get("max_items_per_ticker")
+        return {
+            "status": "context_pack_missing",
+            "pack_id": "p47-2026-05-01-xxx",
+            "tickers": ["NVDA"],
+            "missing_context": ["missing_ticker_context:NVDA"],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_research_context_pack", fake_run)
+    code = main(["--app-root", str(app_root), "research-context-pack-run", "--as-of-date", "2026-05-01", "--tickers", "NVDA", "--lookback-days", "90", "--max-items-per-ticker", "4"])
+
+    assert code == 0
+    assert captured["tickers"] == ["NVDA"]
+    assert captured["lookback_days"] == 90
+    assert captured["max_items_per_ticker"] == 4
