@@ -79,6 +79,13 @@ are persisted and written to artifacts, but P38 does not alter
 `JudgeInputPacket`, P35 governance runtime, P36 outcome tracking, P37
 market-regime context, or production configuration.
 
+#### P39 Candidate Pool Engine
+
+`candidate_pool.py` consumes a point-in-time ticker universe plus read-only
+P36/P37/P38 evidence. It emits a candidate pool for human review. The flow
+is one-way: candidate-pool artifacts do not call `HermesResearchApp.run()`,
+`final_judge`, `_extract_thesis_inputs()`, or broker/order APIs.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 

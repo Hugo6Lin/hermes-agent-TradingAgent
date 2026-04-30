@@ -35,6 +35,7 @@ This branch has moved beyond the old P20 starting point. It now includes:
 - P36 recommendation outcome tracking
 - P37 market regime context
 - P38 fundamental quality engine
+- P39 candidate pool discovery
 
 ## What Hermes Answers
 
@@ -473,6 +474,35 @@ P38 is evidence only. It does not change ticker recommendations, call
 train models, schedule jobs, send notifications, place trades, or approve
 production adoption.
 
+### P39 Candidate Pool Engine
+
+Core module:
+
+```text
+agent/research_v1/candidate_pool.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli candidate-pool-run \
+  --input /path/to/universe.json \
+  --as-of-date 2026-04-30 \
+  --output-root output/governance \
+  --max-candidates 20
+```
+
+P39 screens a point-in-time ticker universe and ranks research candidates
+using deterministic momentum, quality (P38), regime (P37), liquidity, risk,
+and track-record component scores. It joins read-only P36/P37/P38 evidence
+when available, assigns candidate categories, and writes
+`p39_candidate_pool.{json,md}` under `output/governance/YYYY-MM-DD/`.
+
+P39 is candidate-discovery evidence only. It does not call
+`HermesResearchApp.run()`, `final_judge`, create `CanonicalSignal` or
+`CanonicalReport`, place orders, train models, schedule jobs, or mutate
+P36/P37/P38 evidence.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -550,6 +580,14 @@ Use Python 3.11:
   -q
 ```
 
+### P39 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_candidate_pool.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -581,7 +619,7 @@ Recent result:
 60 passed
 ```
 
-### Full P20-P38 Governance Chain
+### Full P20-P39 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -617,6 +655,7 @@ Recent result:
   tests/agent/research_v1/test_recommendation_outcomes.py \
   tests/agent/research_v1/test_market_regime_context.py \
   tests/agent/research_v1/test_fundamental_quality.py \
+  tests/agent/research_v1/test_candidate_pool.py \
   -q
 ```
 
