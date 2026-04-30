@@ -255,6 +255,44 @@ def build_preview_decision_input(ticker: str, as_of_date: str) -> dict[str, Any]
     }
 
 
+# --- P49-B: Safe Futu provider adapter for P37 ---
+
+_VIX_FALLBACK_CHAIN = ("US.VIX", "US.VXX", "US.UVXY")
+
+
+class SafeMarketRegimeProvider:
+    """Wraps a market-data provider with Futu symbol mapping and VIX fallback."""
+
+    data_source = "futu_opend"
+    price_adjustment = "adjusted"
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def _futu_symbol(self, symbol: str) -> str:
+        if symbol.startswith(("US.", "HK.", "SH.", "SZ.", "SG.")):
+            return symbol
+        if symbol == "VIX":
+            return "US.VIX"
+        return f"US.{symbol}"
+
+    def fetch_history(self, symbol: str, start_date: Any, end_date: Any) -> list[dict[str, Any]]:
+        if symbol == "VIX":
+            for candidate in _VIX_FALLBACK_CHAIN:
+                try:
+                    rows = self._inner.fetch_history(candidate, start_date, end_date)
+                    if rows:
+                        return rows
+                except Exception:
+                    continue
+            return []
+        futu_sym = self._futu_symbol(symbol)
+        try:
+            return self._inner.fetch_history(futu_sym, start_date, end_date)
+        except Exception:
+            return []
+
+
 # --- P49-B: Safe phase runner ---
 
 
@@ -295,6 +333,24 @@ def _safe_call(phase_id: str, fn: Callable[..., dict[str, Any]], data_source: st
 
 
 # --- P49-B: Main runtime ---
+
+
+def _build_safe_p37_provider(provider: Any | None) -> Any:
+    if provider is not None:
+        return SafeMarketRegimeProvider(provider)
+
+    class _DefaultFutuProvider:
+        data_source = "futu_opend"
+        price_adjustment = "adjusted"
+
+        def __init__(self) -> None:
+            from agent.research_v1.data.futu_opend import FutuQuoteClient
+            self._client = FutuQuoteClient()
+
+        def fetch_history(self, symbol: str, start_date: Any, end_date: Any) -> list[dict[str, Any]]:
+            return self._client.fetch_history(symbol=symbol, start_date=str(start_date), end_date=str(end_date))
+
+    return SafeMarketRegimeProvider(_DefaultFutuProvider())
 
 
 def run_boss_preview(db: Any, tickers: list[str], as_of_date: str, output_root: Path, governance_root: Path, live: bool = True, max_candidates: int = 8, provider: Any | None = None, phase_runners: dict[str, Callable[..., dict[str, Any]]] | None = None) -> dict[str, Any]:
@@ -348,7 +404,7 @@ def run_boss_preview(db: Any, tickers: list[str], as_of_date: str, output_root: 
     p45_symbols = futu_symbols_for_tickers(normalized)
     option_symbol = next((s for s in p45_symbols if s.startswith("US.")), "US.AAPL")
     phase_results.append(_safe_call("P45", phase_runners["P45"], "live" if live else "environment", "Checked Futu market-data readiness.", output_root=output_root, as_of_date=as_of_date, symbols=p45_symbols, option_symbol=option_symbol, live=live, provider=provider))
-    phase_results.append(_safe_call("P37", phase_runners["P37"], "live" if live else "provider", "Attempted market-regime snapshot.", db=db, as_of_date=date.fromisoformat(as_of_date), output_root=output_root, provider=provider))
+    phase_results.append(_safe_call("P37", phase_runners["P37"], "live" if live else "provider", "Attempted market-regime snapshot.", db=db, as_of_date=date.fromisoformat(as_of_date), output_root=output_root, provider=_build_safe_p37_provider(provider)))
     phase_results.append(_safe_call("P38", phase_runners["P38"], "sample", "Scored preview sample fundamentals.", db=db, input_payload=p38_input, as_of_date=as_of_date, output_root=output_root))
     phase_results.append(_safe_call("P39", phase_runners["P39"], "sample", "Ranked preview candidate pool.", db=db, input_payload=p39_input, as_of_date=as_of_date, output_root=output_root, max_candidates=max_candidates))
     phase_results.append(_safe_call("P40", phase_runners["P40"], "database", "Collected prior research memory.", db=db, tickers=[t.replace("US.", "") for t in normalized[:2]], as_of_date=as_of_date, output_root=output_root))

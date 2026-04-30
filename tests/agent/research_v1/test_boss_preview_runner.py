@@ -111,3 +111,68 @@ def test_run_boss_preview_writes_boss_report_with_fake_phase_runners(tmp_path: P
     )
     assert result["status"] in {"boss_preview_ready", "boss_preview_limited"}
     assert (tmp_path / "output" / "governance" / "2026-05-01" / "boss_preview.md").exists()
+
+
+# --- P49: Safe provider / VIX fallback tests ---
+
+from agent.research_v1.boss_preview_runner import SafeMarketRegimeProvider
+
+
+def test_safe_provider_maps_plain_symbols_to_us_prefix():
+    class FakeProvider:
+        data_source = "test"
+        price_adjustment = "adjusted"
+        def fetch_history(self, symbol, start_date, end_date):
+            return [{"symbol": symbol, "date": "2026-05-01", "close": 100.0}]
+
+    safe = SafeMarketRegimeProvider(FakeProvider())
+    rows = safe.fetch_history("SPY", "2026-01-01", "2026-05-01")
+    assert rows[0]["symbol"] == "US.SPY"
+
+
+def test_safe_provider_vix_fallback_to_vxx():
+    """When US.VIX raises, SafeMarketRegimeProvider should try US.VXX."""
+    class VixFailsProvider:
+        data_source = "test"
+        price_adjustment = "adjusted"
+        def fetch_history(self, symbol, start_date, end_date):
+            if symbol == "US.VIX":
+                raise RuntimeError("unknown symbol: US.VIX")
+            if symbol == "US.VXX":
+                return [{"symbol": "VXX", "date": "2026-05-01", "close": 25.0}]
+            return []
+
+    safe = SafeMarketRegimeProvider(VixFailsProvider())
+    rows = safe.fetch_history("VIX", "2026-01-01", "2026-05-01")
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "VXX"
+
+
+def test_safe_provider_vix_all_fail_returns_empty():
+    """When all VIX fallback symbols fail, return empty list without raising."""
+    class AllFailProvider:
+        data_source = "test"
+        price_adjustment = "adjusted"
+        def fetch_history(self, symbol, start_date, end_date):
+            raise RuntimeError(f"unknown symbol: {symbol}")
+
+    safe = SafeMarketRegimeProvider(AllFailProvider())
+    rows = safe.fetch_history("VIX", "2026-01-01", "2026-05-01")
+    assert rows == []
+
+
+def test_safe_provider_preserves_prefixed_symbols():
+    """Prefixed symbols like US.AMZN should not get double-prefixed."""
+    class CaptureProvider:
+        data_source = "test"
+        price_adjustment = "adjusted"
+        def __init__(self):
+            self.called_with = []
+        def fetch_history(self, symbol, start_date, end_date):
+            self.called_with.append(symbol)
+            return [{"symbol": symbol, "date": "2026-05-01", "close": 100.0}]
+
+    inner = CaptureProvider()
+    safe = SafeMarketRegimeProvider(inner)
+    safe.fetch_history("US.AMZN", "2026-01-01", "2026-05-01")
+    assert inner.called_with == ["US.AMZN"]
