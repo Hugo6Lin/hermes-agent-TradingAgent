@@ -133,6 +133,10 @@ context rather than hidden.
 
 `research_context_prompt_pack.py` reads the latest P47 context pack from DB or artifact, maps ticker context to analyst roles, and writes role-specific prompt-context previews plus a dry-run injection manifest. The flow is one-way: P48 does not call analysts, LLMs, `HermesResearchApp.run()`, `SubagentExecutor`, `final_judge`, P36-P47 runtimes, market-data providers, or broker/order APIs. It does not mutate `SubagentTask.required_context` or inject context into live prompts.
 
+#### P49 Boss Preview Runner
+
+`boss_preview_runner.py` is a one-command preview orchestrator where the boss only supplies tickers. It normalizes input, attempts live Futu readiness by default, generates valid preview sample inputs when real data is absent, runs safe P37-P48 preview phases, and writes a boss-readable preview report. The flow is one-way: P49 does not call `HermesResearchApp.run()`, `final_judge`, `SubagentExecutor`, LLMs, broker/order APIs, model training, scheduling, or notifications.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 
