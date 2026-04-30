@@ -239,6 +239,12 @@ def _empty_result(request: GovernanceRuntimeRequest, status: str, warning: str) 
     )
 
 
+def _validate_edge_review_config(config: dict[str, Any]) -> None:
+    for item in config.get("edge_reviews", []):
+        _ = item["family_namespace"]
+        _ = item["family_type"]
+
+
 def _parse_config(
     request: GovernanceRuntimeRequest,
 ) -> tuple[
@@ -261,6 +267,7 @@ def _parse_config(
         freshness_policy_days=request.freshness_policy_days,
     )
     generation_requests = _generation_requests(config)
+    _validate_edge_review_config(config)
     return config, daily_request, registry_request, generation_requests
 
 
