@@ -2793,3 +2793,198 @@ class ResearchDatabase:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    # ── P44 Evidence Freshness & Drift Monitor ───────────────────────────
+
+    def initialize_evidence_freshness_drift_schema(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS evidence_freshness_drift_reports (
+                report_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                lookback_days INTEGER NOT NULL,
+                freshness_days INTEGER NOT NULL,
+                phase_count INTEGER NOT NULL,
+                red_count INTEGER NOT NULL,
+                yellow_count INTEGER NOT NULL,
+                source_hash TEXT NOT NULL,
+                report_json TEXT NOT NULL,
+                UNIQUE(as_of_date, lookback_days, freshness_days, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_evidence_freshness_drift_report(self, report: dict) -> str:
+        self.initialize_evidence_freshness_drift_schema()
+        summary = report.get("summary", {})
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO evidence_freshness_drift_reports (
+                report_id, schema_version, as_of_date, created_at, status,
+                lookback_days, freshness_days, phase_count, red_count, yellow_count,
+                source_hash, report_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                report["report_id"],
+                report["schema_version"],
+                report["as_of_date"],
+                report.get("created_at", ""),
+                report.get("status", ""),
+                report.get("lookback_days", 0),
+                report.get("freshness_days", 0),
+                summary.get("phase_count", 0),
+                summary.get("red_count", 0),
+                summary.get("yellow_count", 0),
+                report["source_hash"],
+                json.dumps(report),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return report["report_id"]
+
+    def list_evidence_freshness_drift_reports(self, as_of_date: str | None = None, limit: int = 20) -> list[dict]:
+        self.initialize_evidence_freshness_drift_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if as_of_date:
+            cursor.execute(
+                """SELECT * FROM evidence_freshness_drift_reports
+                   WHERE as_of_date = ?
+                   ORDER BY created_at DESC, report_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+        else:
+            cursor.execute(
+                """SELECT * FROM evidence_freshness_drift_reports
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC
+                   LIMIT ?""",
+                (limit,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def collect_evidence_phase_rows(self, as_of_date: str, lookback_days: int) -> dict[str, list[dict]]:
+        """Collect recent evidence rows for P44. Missing tables return empty phase lists."""
+        from datetime import date as _date, timedelta as _td
+
+        result: dict[str, list[dict]] = {p: [] for p in ("P36", "P37", "P38", "P39", "P40", "P41", "P42", "P43")}
+        cutoff = (_date.fromisoformat(as_of_date) - _td(days=lookback_days)).isoformat()
+
+        queries = {
+            "P36": {
+                "table": "canonical_recommendation_outcomes",
+                "date_col": "evaluated_for_date",
+                "created_col": "evaluated_at",
+                "hash_col": "data_source_hash",
+                "status_col": "status",
+                "json_cols": [],
+            },
+            "P37": {
+                "table": "market_regime_snapshots",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "data_source_hash",
+                "status_col": "regime_label",
+                "json_cols": ["summary_json"],
+            },
+            "P38": {
+                "table": "fundamental_quality_reports",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "quality_label",
+                "json_cols": ["missing_required_fields_json", "warnings_json"],
+            },
+            "P39": {
+                "table": "candidate_pool_runs",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "status",
+                "json_cols": [],
+            },
+            "P40": {
+                "table": "research_memory_packs",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "memory_status",
+                "json_cols": ["missing_context_json"],
+            },
+            "P41": {
+                "table": "decision_journal_entries",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "severity",
+                "json_cols": ["entry_json"],
+            },
+            "P42": {
+                "table": "boss_copilot_daily_briefs",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "status",
+                "json_cols": ["brief_json"],
+            },
+            "P43": {
+                "table": "copilot_console_indexes",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "status",
+                "json_cols": ["index_json"],
+            },
+        }
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        for phase, cfg in queries.items():
+            try:
+                json_select = ", ".join(cfg["json_cols"]) if cfg["json_cols"] else "'{}' AS _empty"
+                cursor.execute(
+                    f"""SELECT {cfg['date_col']}, {cfg['created_col']}, {cfg['hash_col']}, {cfg['status_col']},
+                               {json_select}
+                        FROM {cfg['table']}
+                        WHERE {cfg['date_col']} >= ? AND {cfg['date_col']} <= ?
+                        ORDER BY {cfg['date_col']} DESC, {cfg['created_col']} DESC
+                        LIMIT 100""",
+                    (cutoff, as_of_date),
+                )
+                rows = []
+                for row in cursor.fetchall():
+                    d = dict(row)
+                    payload: dict = {}
+                    for json_col in cfg["json_cols"]:
+                        raw = d.get(json_col)
+                        if raw:
+                            try:
+                                parsed = json.loads(raw)
+                                if isinstance(parsed, dict):
+                                    payload.update(parsed)
+                                else:
+                                    payload[json_col] = parsed
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                    rows.append({
+                        "phase_id": phase,
+                        "as_of_date": d.get(cfg["date_col"], ""),
+                        "created_at": d.get(cfg["created_col"], ""),
+                        "source_hash": d.get(cfg["hash_col"], ""),
+                        "status": d.get(cfg["status_col"], ""),
+                        "payload": payload,
+                    })
+                result[phase] = rows
+            except Exception:
+                result[phase] = []
+        conn.close()
+        return result
