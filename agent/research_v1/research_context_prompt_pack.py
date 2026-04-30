@@ -1,0 +1,284 @@
+"""P48 research context prompt pack dry-run."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+P48_SCHEMA_VERSION = "p48_research_context_prompt_pack.1"
+P48_DISCLAIMER = (
+    "P48 is a dry-run prompt-context pack only. It does not call analysts, "
+    "call LLMs, inject prompts, submit orders, approve production adoption, "
+    "train models, schedule jobs, or change research decisions."
+)
+SUPPORTED_ROLES = ("fundamentals", "technical", "news", "sentiment", "industry", "options", "risk", "valuation")
+TICKER_RE = re.compile(r"^[A-Z0-9._-]{1,20}$")
+FORBIDDEN_RENDER_TERMS = (
+    "buy this now",
+    "sell this now",
+    "follow this trade",
+    "guaranteed edge",
+    "production approved",
+    "model promoted",
+    "execute trade",
+    "place order",
+    "unlock_trade",
+)
+ROLE_SECTION_MAP = {
+    "fundamentals": ("fundamental_quality", "memory_context", "outcome_context", "evidence_health"),
+    "technical": ("market_regime", "outcome_context", "candidate_context", "evidence_health"),
+    "news": ("memory_context", "candidate_context", "evidence_health"),
+    "sentiment": ("memory_context", "decision_guardrails", "outcome_context"),
+    "industry": ("market_regime", "candidate_context", "fundamental_quality"),
+    "options": ("market_regime", "outcome_context", "decision_guardrails", "provider_status"),
+    "risk": ("decision_guardrails", "outcome_context", "evidence_health", "refresh_context"),
+    "valuation": ("fundamental_quality", "outcome_context", "memory_context"),
+}
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def normalize_tickers(tickers: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in tickers:
+        ticker = str(raw).strip().upper()
+        if ticker and ticker not in seen:
+            seen.add(ticker)
+            out.append(ticker)
+    return out
+
+
+def normalize_roles(roles: list[str] | None) -> list[str]:
+    source = list(roles) if roles else list(SUPPORTED_ROLES)
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in source:
+        role = str(raw).strip().lower()
+        if role and role not in seen:
+            seen.add(role)
+            out.append(role)
+    return out
+
+
+def validate_prompt_pack_inputs(
+    as_of_date: str,
+    tickers: list[str],
+    roles: list[str] | None,
+    max_block_chars: int,
+    governance_root_is_dir: bool,
+) -> dict[str, Any]:
+    warnings: list[str] = []
+    try:
+        date.fromisoformat(as_of_date)
+    except (TypeError, ValueError):
+        warnings.append(f"invalid_as_of_date:{as_of_date}")
+    normalized_tickers = normalize_tickers(tickers)
+    if not normalized_tickers:
+        warnings.append("empty_ticker_list")
+    for ticker in normalized_tickers:
+        if not TICKER_RE.match(ticker):
+            warnings.append(f"invalid_ticker:{ticker}")
+    normalized_roles = normalize_roles(roles)
+    for role in normalized_roles:
+        if role not in SUPPORTED_ROLES:
+            warnings.append(f"unknown_role:{role}")
+    if max_block_chars <= 0:
+        warnings.append("max_block_chars_must_be_positive")
+    if not governance_root_is_dir:
+        warnings.append("governance_root_not_a_directory")
+    if warnings:
+        return {
+            "schema_version": P48_SCHEMA_VERSION,
+            "status": "blocked_invalid_input",
+            "warnings": warnings,
+            "tickers": normalized_tickers,
+            "roles": normalized_roles,
+        }
+    return {"status": "valid", "tickers": normalized_tickers, "roles": normalized_roles, "warnings": []}
+
+
+def _sha256_json(payload: Any) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _find_ticker_context(source_pack: dict[str, Any], ticker: str) -> dict[str, Any] | None:
+    for ctx in source_pack.get("ticker_contexts", []):
+        if str(ctx.get("ticker", "")).upper() == ticker:
+            return ctx
+    return None
+
+
+def _build_role_context(source_pack: dict[str, Any], ticker: str, role: str, max_block_chars: int) -> dict[str, Any]:
+    ticker_ctx = _find_ticker_context(source_pack, ticker) or {}
+    system = source_pack.get("system_context", {})
+    sections: dict[str, Any] = {}
+    omitted: list[str] = []
+    warnings: list[str] = []
+    for section_name in ROLE_SECTION_MAP[role]:
+        value = system.get(section_name) if section_name == "provider_status" else ticker_ctx.get(section_name)
+        if not value:
+            omitted.append(f"missing_section:{ticker}:{role}:{section_name}")
+            continue
+        candidate = dict(sections)
+        candidate[section_name] = value
+        if len(json.dumps(candidate, sort_keys=True, default=str)) <= max_block_chars:
+            sections[section_name] = value
+        else:
+            omitted.append(f"omitted_section:{ticker}:{role}:{section_name}:max_block_chars")
+            warnings.append(f"context_truncated:{ticker}:{role}")
+    if sections and warnings:
+        status = "role_context_limited"
+    elif sections:
+        status = "role_context_ready"
+    else:
+        status = "role_context_missing"
+    preview = {
+        "schema_version": P48_SCHEMA_VERSION,
+        "ticker": ticker,
+        "role": role,
+        "as_of_date": source_pack.get("as_of_date"),
+        "source_context_pack_id": source_pack.get("pack_id"),
+        "context_status": status,
+        "context_blocks": sections,
+        "not_injected": True,
+    }
+    block_hash = _sha256_json(preview)
+    return {
+        "ticker": ticker,
+        "role": role,
+        "context_status": status,
+        "context_blocks": sections,
+        "required_context_preview": preview,
+        "source_refs": ticker_ctx.get("source_refs", []) + source_pack.get("source_refs", []),
+        "omitted_context": omitted,
+        "warnings": sorted(set(warnings)),
+        "block_hash": block_hash,
+    }
+
+
+def build_research_context_prompt_pack(
+    *,
+    as_of_date: str,
+    tickers: list[str],
+    roles: list[str] | None,
+    max_block_chars: int,
+    source_pack: dict[str, Any],
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    normalized_tickers = normalize_tickers(tickers)
+    normalized_roles = normalize_roles(roles)
+    role_contexts = [
+        _build_role_context(source_pack, ticker, role, max_block_chars)
+        for ticker in normalized_tickers
+        for role in normalized_roles
+    ]
+    manifest = [
+        {
+            "ticker": ctx["ticker"],
+            "role": ctx["role"],
+            "dry_run_only": True,
+            "target_object": "SubagentTask.required_context",
+            "target_key": "research_context_pack",
+            "would_set_keys": sorted(ctx["required_context_preview"].keys()),
+            "context_status": ctx["context_status"],
+            "block_hash": ctx["block_hash"],
+        }
+        for ctx in role_contexts
+    ]
+    omitted = sorted({item for ctx in role_contexts for item in ctx.get("omitted_context", [])})
+    warnings = sorted({item for ctx in role_contexts for item in ctx.get("warnings", [])})
+    if all(ctx["context_status"] == "role_context_ready" for ctx in role_contexts):
+        status = "prompt_pack_ready"
+    elif any(ctx["context_status"] != "role_context_missing" for ctx in role_contexts):
+        status = "prompt_pack_limited"
+    else:
+        status = "blocked_missing_context"
+    seed = {
+        "schema_version": P48_SCHEMA_VERSION,
+        "as_of_date": as_of_date,
+        "tickers": normalized_tickers,
+        "roles": normalized_roles,
+        "max_block_chars": max_block_chars,
+        "source_context_pack_id": source_pack.get("pack_id", ""),
+        "source_context_hash": source_pack.get("source_hash", ""),
+        "role_contexts": role_contexts,
+        "dry_run_injection_manifest": manifest,
+        "omitted_context": omitted,
+        "warnings": warnings,
+    }
+    source_hash = _sha256_json(seed)
+    return {
+        "schema_version": P48_SCHEMA_VERSION,
+        "prompt_pack_id": f"p48-{as_of_date}-{source_hash[:12]}",
+        "as_of_date": as_of_date,
+        "created_at": created_at or utc_now_iso(),
+        "status": status,
+        "tickers": normalized_tickers,
+        "roles": normalized_roles,
+        "max_block_chars": max_block_chars,
+        "source_context_pack_id": source_pack.get("pack_id", ""),
+        "source_context_hash": source_pack.get("source_hash", ""),
+        "role_contexts": role_contexts,
+        "dry_run_injection_manifest": manifest,
+        "source_refs": source_pack.get("source_refs", []),
+        "omitted_context": omitted,
+        "warnings": warnings,
+        "source_hash": source_hash,
+        "disclaimer": P48_DISCLAIMER,
+    }
+
+
+def _assert_safe_rendered(text: str) -> None:
+    lowered = text.lower()
+    for term in FORBIDDEN_RENDER_TERMS:
+        if term in lowered:
+            raise ValueError(f"forbidden research context prompt pack term rendered:{term}")
+
+
+def render_research_context_prompt_pack_markdown(pack: dict[str, Any]) -> str:
+    lines = [
+        "# P48 Research Context Prompt Pack",
+        "",
+        f"Status: {pack['status']}",
+        f"As Of: {pack['as_of_date']}",
+        "",
+        "## Source P47 Context",
+        f"- pack_id: {pack.get('source_context_pack_id', '')}",
+        f"- source_hash: {pack.get('source_context_hash', '')}",
+        "",
+        "## Role Contexts",
+    ]
+    for ctx in pack.get("role_contexts", []):
+        lines.append(f"- {ctx['ticker']} / {ctx['role']}: {ctx['context_status']}")
+    lines.extend(["", "## Dry-Run Injection Manifest"])
+    for item in pack.get("dry_run_injection_manifest", []):
+        lines.append(f"- {item['ticker']} / {item['role']} -> {item['target_object']}[{item['target_key']}] dry_run={item['dry_run_only']}")
+    lines.extend(["", "## Omitted Context"])
+    lines.extend([f"- {item}" for item in pack.get("omitted_context", [])] or ["- none"])
+    lines.extend(["", "## Warnings"])
+    lines.extend([f"- {item}" for item in pack.get("warnings", [])] or ["- none"])
+    lines.extend(["", "## Source References"])
+    for ref in pack.get("source_refs", []):
+        lines.append(f"- {ref.get('phase_id', 'unknown')} {ref.get('artifact_type', 'artifact')} {ref.get('source_hash', '')}")
+    lines.extend(["", "## Disclaimer", "", pack.get("disclaimer", P48_DISCLAIMER), ""])
+    text = "\n".join(lines)
+    _assert_safe_rendered(text)
+    return text
+
+
+def write_research_context_prompt_pack(pack: dict[str, Any], output_root: Path) -> list[str]:
+    output_dir = output_root / pack["as_of_date"]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "p48_research_context_prompt_pack.json"
+    md_path = output_dir / "p48_research_context_prompt_pack.md"
+    json_path.write_text(json.dumps(pack, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+    md_path.write_text(render_research_context_prompt_pack_markdown(pack), encoding="utf-8")
+    return [str(json_path), str(md_path)]

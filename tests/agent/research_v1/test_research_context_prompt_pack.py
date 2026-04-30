@@ -1,0 +1,116 @@
+"""Tests for P48 research context prompt pack dry-run."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from agent.research_v1.research_context_prompt_pack import (
+    P48_DISCLAIMER,
+    build_research_context_prompt_pack,
+    normalize_roles,
+    render_research_context_prompt_pack_markdown,
+    validate_prompt_pack_inputs,
+    write_research_context_prompt_pack,
+)
+
+
+def _source_pack() -> dict:
+    return {
+        "pack_id": "p47-2026-05-01-source",
+        "as_of_date": "2026-05-01",
+        "source_hash": "p47-source-hash",
+        "tickers": ["AAPL"],
+        "system_context": {"provider_status": "provider_ready", "evidence_health_status": "monitor_green"},
+        "ticker_contexts": [
+            {
+                "ticker": "AAPL",
+                "context_status": "context_ready",
+                "market_regime": {"regime_label": "neutral"},
+                "fundamental_quality": {"quality_score": 82, "quality_label": "strong"},
+                "candidate_context": {"candidate_status": "candidate"},
+                "outcome_context": {"win_rate": 0.6},
+                "memory_context": {"memory_status": "memory_ready"},
+                "decision_guardrails": {"severity": "info"},
+                "refresh_context": {"refresh_candidate_count": 1},
+                "evidence_health": {"status": "monitor_green"},
+                "source_refs": [{"phase_id": "P38", "artifact_type": "fundamental_quality", "source_hash": "q"}],
+                "missing_context": [],
+                "warnings": [],
+            }
+        ],
+        "source_refs": [{"phase_id": "P47", "artifact_type": "research_context_pack", "source_hash": "p47-source-hash"}],
+        "missing_context": [],
+        "warnings": [],
+    }
+
+
+def test_normalize_roles_deduplicates_and_preserves_order():
+    assert normalize_roles([" Risk ", "fundamentals", "risk"]) == ["risk", "fundamentals"]
+
+
+def test_validate_prompt_pack_inputs_rejects_unknown_role():
+    result = validate_prompt_pack_inputs("2026-05-01", ["AAPL"], ["wizard"], 1200, True)
+    assert result["status"] == "blocked_invalid_input"
+    assert "unknown_role:wizard" in result["warnings"]
+
+
+def test_build_prompt_pack_creates_role_context_and_manifest():
+    pack = build_research_context_prompt_pack(
+        as_of_date="2026-05-01",
+        tickers=["AAPL"],
+        roles=["fundamentals", "risk"],
+        max_block_chars=1200,
+        source_pack=_source_pack(),
+    )
+    assert pack["status"] == "prompt_pack_ready"
+    assert len(pack["role_contexts"]) == 2
+    assert pack["dry_run_injection_manifest"][0]["dry_run_only"] is True
+    assert pack["dry_run_injection_manifest"][0]["target_object"] == "SubagentTask.required_context"
+    assert pack["role_contexts"][0]["required_context_preview"]["not_injected"] is True
+
+
+def test_truncation_marks_limited_and_omitted_context():
+    source = _source_pack()
+    source["ticker_contexts"][0]["fundamental_quality"] = {"long": "x" * 500}
+    pack = build_research_context_prompt_pack(
+        as_of_date="2026-05-01",
+        tickers=["AAPL"],
+        roles=["fundamentals"],
+        max_block_chars=80,
+        source_pack=source,
+    )
+    assert pack["status"] == "prompt_pack_limited"
+    assert pack["role_contexts"][0]["context_status"] == "role_context_limited"
+    assert any(item.startswith("omitted_section:AAPL:fundamentals") for item in pack["omitted_context"])
+
+
+def test_markdown_renderer_includes_required_sections():
+    pack = build_research_context_prompt_pack(
+        as_of_date="2026-05-01",
+        tickers=["AAPL"],
+        roles=["risk"],
+        max_block_chars=1200,
+        source_pack=_source_pack(),
+    )
+    md = render_research_context_prompt_pack_markdown(pack)
+    assert "# P48 Research Context Prompt Pack" in md
+    assert "## Dry-Run Injection Manifest" in md
+    assert "## Disclaimer" in md
+    assert P48_DISCLAIMER in md
+
+
+def test_write_research_context_prompt_pack_creates_files(tmp_path: Path):
+    pack = build_research_context_prompt_pack(
+        as_of_date="2026-05-01",
+        tickers=["AAPL"],
+        roles=["risk"],
+        max_block_chars=1200,
+        source_pack=_source_pack(),
+    )
+    artifacts = write_research_context_prompt_pack(pack, tmp_path)
+    assert len(artifacts) == 2
+    loaded = json.loads((tmp_path / "2026-05-01" / "p48_research_context_prompt_pack.json").read_text())
+    assert loaded["prompt_pack_id"] == pack["prompt_pack_id"]
