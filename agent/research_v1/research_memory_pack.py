@@ -514,7 +514,7 @@ def run_research_memory_pack(
             sid = sig.get("signal_id", "")
             if sid:
                 try:
-                    outcomes_by_signal[sid] = db.list_recommendation_outcomes_for_signal(sid)
+                    outcomes_by_signal[sid] = db.list_canonical_outcomes_by_signal(sid)
                 except Exception:
                     outcomes_by_signal[sid] = []
         records["outcomes_by_signal"] = outcomes_by_signal

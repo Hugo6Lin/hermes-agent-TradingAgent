@@ -2298,3 +2298,210 @@ class ResearchDatabase:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    # ── P40 research memory pack helpers ──────────────────────────────────
+
+    def initialize_memory_pack_schema(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS research_memory_packs (
+                pack_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                lookback_days INTEGER NOT NULL,
+                memory_status TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                latest_research_json TEXT NOT NULL,
+                outcome_summary_json TEXT NOT NULL,
+                candidate_history_json TEXT NOT NULL,
+                quality_context_json TEXT NOT NULL,
+                regime_context_json TEXT NOT NULL,
+                watchlist_context_json TEXT NOT NULL,
+                validation_context_json TEXT NOT NULL,
+                recurring_themes_json TEXT NOT NULL,
+                risk_memory_json TEXT NOT NULL,
+                missing_context_json TEXT NOT NULL,
+                source_refs_json TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                UNIQUE(ticker, as_of_date, lookback_days, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_research_memory_pack(self, pack: dict) -> str:
+        self.initialize_memory_pack_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO research_memory_packs (
+                pack_id, schema_version, as_of_date, created_at, ticker,
+                lookback_days, memory_status, source_hash,
+                latest_research_json, outcome_summary_json, candidate_history_json,
+                quality_context_json, regime_context_json, watchlist_context_json,
+                validation_context_json, recurring_themes_json, risk_memory_json,
+                missing_context_json, source_refs_json, summary
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                pack["pack_id"],
+                pack["schema_version"],
+                pack["as_of_date"],
+                pack["created_at"],
+                pack["ticker"],
+                pack["lookback_days"],
+                pack["memory_status"],
+                pack["source_hash"],
+                json.dumps(pack.get("latest_research", {})),
+                json.dumps(pack.get("outcome_summary", {})),
+                json.dumps(pack.get("candidate_history", {})),
+                json.dumps(pack.get("quality_context", {})),
+                json.dumps(pack.get("regime_context", {})),
+                json.dumps(pack.get("watchlist_context", {})),
+                json.dumps(pack.get("validation_context", {})),
+                json.dumps(pack.get("recurring_themes", [])),
+                json.dumps(pack.get("risk_memory", [])),
+                json.dumps(pack.get("missing_context", [])),
+                json.dumps(pack.get("source_refs", {})),
+                f"{pack['ticker']}: {pack['memory_status']}",
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return pack["pack_id"]
+
+    def list_research_memory_packs(
+        self,
+        ticker: str | None = None,
+        as_of_date: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        self.initialize_memory_pack_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        conditions: list[str] = []
+        params: list[Any] = []
+        if ticker:
+            conditions.append("ticker = ?")
+            params.append(ticker)
+        if as_of_date:
+            conditions.append("as_of_date = ?")
+            params.append(as_of_date)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+        cursor.execute(
+            f"SELECT * FROM research_memory_packs {where} ORDER BY created_at DESC, pack_id ASC LIMIT ?",
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def list_canonical_signals_for_ticker(
+        self,
+        ticker: str,
+        as_of_date: str,
+        lookback_days: int,
+        limit: int = 5,
+    ) -> list[dict]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM canonical_signals
+               WHERE ticker = ?
+                 AND date(created_at) <= date(?)
+                 AND date(created_at) >= date(?, ?)
+               ORDER BY created_at DESC, signal_id ASC
+               LIMIT ?""",
+            (ticker, as_of_date, as_of_date, f"-{lookback_days} days", limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            d = dict(row)
+            if "risk_flags_json" in d:
+                try:
+                    d["risk_flags"] = json.loads(d["risk_flags_json"])
+                except (json.JSONDecodeError, TypeError):
+                    d["risk_flags"] = []
+            result.append(d)
+        return result
+
+    def list_canonical_reports_for_ticker(
+        self,
+        ticker: str,
+        as_of_date: str,
+        lookback_days: int,
+        limit: int = 5,
+    ) -> list[dict]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM canonical_reports
+               WHERE ticker = ?
+                 AND date(created_at) <= date(?)
+                 AND date(created_at) >= date(?, ?)
+               ORDER BY created_at DESC, report_id ASC
+               LIMIT ?""",
+            (ticker, as_of_date, as_of_date, f"-{lookback_days} days", limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            d = dict(row)
+            for json_col in ("trade_plan_json", "decision_card_json", "instrument_rec_json"):
+                if json_col in d:
+                    try:
+                        d[json_col.replace("_json", "")] = json.loads(d[json_col])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            result.append(d)
+        return result
+
+    def list_candidate_pool_items_for_ticker(
+        self,
+        ticker: str,
+        as_of_date: str,
+        lookback_days: int,
+        limit: int = 5,
+    ) -> list[dict]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM candidate_pool_items
+               WHERE ticker = ?
+                 AND date(created_at) <= date(?)
+                 AND date(created_at) >= date(?, ?)
+               ORDER BY created_at DESC, item_id ASC
+               LIMIT ?""",
+            (ticker, as_of_date, as_of_date, f"-{lookback_days} days", limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_watchlist_entry_for_ticker(self, ticker: str) -> dict | None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM watchlist_entries WHERE ticker = ?",
+            (ticker,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_validation_result_for_ticker(self, ticker: str) -> dict | None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM validation_results WHERE ticker = ?",
+            (ticker,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None

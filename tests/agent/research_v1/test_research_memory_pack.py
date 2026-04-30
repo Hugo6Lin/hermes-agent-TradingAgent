@@ -235,3 +235,61 @@ def test_limited_memory_status_when_only_context_exists():
 def test_disclaimer_contains_required_phrase():
     pack = build_research_memory_pack("AAPL", "2026-04-30", 180, {})
     assert "research-memory evidence only" in pack["disclaimer"]
+
+
+# ── P40-B persistence and artifact tests ─────────────────────────────────
+
+from agent.research_v1.data.database import ResearchDatabase
+from agent.research_v1.research_memory_pack import write_research_memory_artifacts
+
+
+def _db(tmp_path: Path) -> ResearchDatabase:
+    db = ResearchDatabase(str(tmp_path / "research.db"))
+    db.initialize()
+    db.initialize_memory_pack_schema()
+    return db
+
+
+def test_memory_pack_persistence_is_idempotent(tmp_path: Path):
+    db = _db(tmp_path)
+    pack = build_research_memory_pack("AAPL", "2026-04-30", 180, {})
+
+    first = db.save_research_memory_pack(pack)
+    second = db.save_research_memory_pack(pack)
+    rows = db.list_research_memory_packs(ticker="AAPL", as_of_date="2026-04-30")
+
+    assert first == second
+    assert len(rows) == 1
+
+
+def test_revised_memory_pack_source_hash_appends(tmp_path: Path):
+    db = _db(tmp_path)
+    first_pack = build_research_memory_pack("AAPL", "2026-04-30", 180, {})
+    second_pack = build_research_memory_pack("AAPL", "2026-04-30", 180, {"candidate_items": [{"item_id": "i1", "source_hash": "changed", "created_at": "2026-04-29"}]})
+
+    first = db.save_research_memory_pack(first_pack)
+    second = db.save_research_memory_pack(second_pack)
+    rows = db.list_research_memory_packs(ticker="AAPL", as_of_date="2026-04-30")
+
+    assert first != second
+    assert len(rows) == 2
+
+
+def test_memory_artifacts_are_written_and_safe(tmp_path: Path):
+    pack = build_research_memory_pack("AAPL", "2026-04-30", 180, {})
+    payload = {
+        "schema_version": P40_SCHEMA_VERSION,
+        "as_of_date": "2026-04-30",
+        "created_at": pack["created_at"],
+        "status": "completed",
+        "packs": [pack],
+        "summary": {"ticker_count": 1, "memory_available": 0, "limited_memory": 0, "no_prior_memory": 1},
+        "warnings": [],
+        "disclaimer": pack["disclaimer"],
+    }
+    paths = write_research_memory_artifacts(payload, tmp_path / "output" / "governance" / "2026-04-30")
+    text = paths["md"].read_text(encoding="utf-8").lower()
+
+    assert paths["json"].name == "p40_research_memory_pack.json"
+    assert "p40 is research-memory evidence only" in text
+    assert "trade now" not in text
