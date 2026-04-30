@@ -801,3 +801,49 @@ def test_boss_copilot_brief_run_cli_rejects_non_positive_max_priorities(tmp_path
 
     assert code == 2
     assert "max-priorities must be positive" in capsys.readouterr().out
+
+
+# ── P43 copilot-console-index-run CLI tests ─────────────────────────────
+
+def test_copilot_console_index_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "console_ready",
+            "output_dir": str(output_dir),
+            "day_count": 2,
+            "latest_day": "2026-04-30",
+            "missing_artifact_count": 3,
+            "invalid_artifact_count": 0,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_copilot_console_index", fake_run)
+    code = main(["--app-root", str(app_root), "copilot-console-index-run", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Co-pilot console index status: console_ready" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_copilot_console_index_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "copilot-console-index-run", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid copilot-console-index-run input" in capsys.readouterr().out
+
+
+def test_copilot_console_index_run_cli_rejects_non_positive_lookback(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "copilot-console-index-run", "--as-of-date", "2026-04-30", "--lookback-days", "0"])
+
+    assert code == 2
+    assert "lookback-days must be positive" in capsys.readouterr().out
