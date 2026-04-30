@@ -669,6 +669,21 @@ Example:
   --max-items-per-ticker 8
 ```
 
+### P48 Research Context Prompt Pack Dry-Run
+
+P48 converts the latest P47 research context pack into role-specific prompt-context previews:
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli research-context-prompt-pack-run \
+  --as-of-date 2026-05-01 \
+  --tickers AAPL,MSFT \
+  --roles fundamentals,risk \
+  --max-block-chars 1200 \
+  --output-root output/governance
+```
+
+It writes `p48_research_context_prompt_pack.json` and `.md` under `output/governance/YYYY-MM-DD/`. P48 is dry-run only: it does not call analysts, LLMs, `HermesResearchApp.run()`, `final_judge`, providers, or broker/order APIs, and it does not mutate `SubagentTask.required_context`.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -823,6 +838,14 @@ HERMES_LIVE_FUTU=1 /opt/homebrew/bin/python3.11 -m pytest \
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
   tests/agent/research_v1/test_research_context_pack.py \
+  -q
+```
+
+### P48 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_research_context_prompt_pack.py \
   -q
 ```
 

@@ -129,6 +129,10 @@ context rather than hidden.
 
 `research_context_pack.py` reads persisted P36-P46 evidence and governance artifacts, then assembles a read-only research context pack for one or more tickers. The flow is one-way: P47 does not call `HermesResearchApp.run()`, `final_judge`, P36-P46 runtimes, market-data providers, or broker/order APIs. It does not inject context into research prompts or judge prompts in v1.
 
+#### P48 Research Context Prompt Pack Dry-Run
+
+`research_context_prompt_pack.py` reads the latest P47 context pack from DB or artifact, maps ticker context to analyst roles, and writes role-specific prompt-context previews plus a dry-run injection manifest. The flow is one-way: P48 does not call analysts, LLMs, `HermesResearchApp.run()`, `SubagentExecutor`, `final_judge`, P36-P47 runtimes, market-data providers, or broker/order APIs. It does not mutate `SubagentTask.required_context` or inject context into live prompts.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 
