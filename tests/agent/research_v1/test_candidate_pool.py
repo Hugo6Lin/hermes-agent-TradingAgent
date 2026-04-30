@@ -395,3 +395,105 @@ def test_run_candidate_pool_uses_prior_day_p38_evidence(tmp_path: Path):
     candidate = pool_data["candidates"][0]
     assert "missing_fundamental_quality" not in candidate["missing_context"]
     assert candidate["evidence_refs"].get("p38_quality_source_hash") == "prior_quality"
+
+
+def test_same_day_p37_revision_returns_latest_created_at(tmp_path: Path):
+    """When two P37 snapshots share the same as_of_date, the later created_at wins."""
+    from agent.research_v1.data.database import ResearchDatabase
+
+    db = ResearchDatabase(str(tmp_path / "research.db"))
+    db.initialize()
+    db.initialize_market_regime_schema()
+
+    db.save_market_regime_snapshot({
+        "schema_version": "p37_market_regime.1",
+        "as_of_date": "2026-04-30",
+        "created_at": "2026-04-30T08:00:00+00:00",
+        "regime_label": "risk_off",
+        "confidence": 0.60,
+        "coverage_ratio": 0.90,
+        "summary": "early snapshot",
+        "sector_rotation": {},
+        "classification_reasons": [],
+        "missing_symbols": [],
+        "stale_symbols": [],
+        "data_source_hash": "early_regime",
+    })
+    db.save_market_regime_snapshot({
+        "schema_version": "p37_market_regime.1",
+        "as_of_date": "2026-04-30",
+        "created_at": "2026-04-30T16:00:00+00:00",
+        "regime_label": "risk_on_broad",
+        "confidence": 0.85,
+        "coverage_ratio": 0.95,
+        "summary": "later snapshot",
+        "sector_rotation": {},
+        "classification_reasons": [],
+        "missing_symbols": [],
+        "stale_symbols": [],
+        "data_source_hash": "later_regime",
+    })
+
+    rows = db.list_market_regime_snapshots_as_of("2026-04-30", limit=1)
+    assert len(rows) == 1
+    assert rows[0]["data_source_hash"] == "later_regime"
+
+
+def test_same_day_p38_revision_returns_latest_created_at(tmp_path: Path):
+    """When two P38 reports share the same as_of_date for the same ticker, the later created_at wins."""
+    from agent.research_v1.data.database import ResearchDatabase
+
+    db = ResearchDatabase(str(tmp_path / "research.db"))
+    db.initialize()
+    db.initialize_fundamental_quality_schema()
+
+    db.save_fundamental_quality_report({
+        "schema_version": "p38_fundamental_quality.1",
+        "as_of_date": "2026-04-30",
+        "created_at": "2026-04-30T08:00:00+00:00",
+        "ticker": "AAPL",
+        "sector": "technology",
+        "currency": "USD",
+        "status": "completed",
+        "quality_label": "solid_quality",
+        "overall_quality_score": 0.65,
+        "confidence": 0.80,
+        "coverage_ratio": 1.0,
+        "usable_row_count": 4,
+        "ignored_future_row_count": 0,
+        "dimension_scores": {},
+        "latest_metrics": {},
+        "trend_metrics": {},
+        "red_flags": [],
+        "missing_required_fields": [],
+        "warnings": [],
+        "source_hash": "early_quality",
+        "summary": "AAPL: solid_quality (early)",
+    })
+    db.save_fundamental_quality_report({
+        "schema_version": "p38_fundamental_quality.1",
+        "as_of_date": "2026-04-30",
+        "created_at": "2026-04-30T16:00:00+00:00",
+        "ticker": "AAPL",
+        "sector": "technology",
+        "currency": "USD",
+        "status": "completed",
+        "quality_label": "compounder_quality",
+        "overall_quality_score": 0.85,
+        "confidence": 0.90,
+        "coverage_ratio": 1.0,
+        "usable_row_count": 5,
+        "ignored_future_row_count": 0,
+        "dimension_scores": {},
+        "latest_metrics": {},
+        "trend_metrics": {},
+        "red_flags": [],
+        "missing_required_fields": [],
+        "warnings": [],
+        "source_hash": "later_quality",
+        "summary": "AAPL: compounder_quality (later)",
+    })
+
+    rows = db.list_fundamental_quality_reports_as_of("AAPL", "2026-04-30", limit=1)
+    assert len(rows) == 1
+    assert rows[0]["source_hash"] == "later_quality"

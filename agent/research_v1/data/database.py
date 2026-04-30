@@ -2005,7 +2005,7 @@ class ResearchDatabase:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM market_regime_snapshots WHERE as_of_date <= ? ORDER BY as_of_date DESC LIMIT ?",
+            "SELECT * FROM market_regime_snapshots WHERE as_of_date <= ? ORDER BY as_of_date DESC, created_at DESC LIMIT ?",
             (as_of_date, limit),
         )
         rows = cursor.fetchall()
@@ -2132,7 +2132,7 @@ class ResearchDatabase:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM fundamental_quality_reports WHERE ticker = ? AND as_of_date <= ? ORDER BY as_of_date DESC LIMIT ?",
+            "SELECT * FROM fundamental_quality_reports WHERE ticker = ? AND as_of_date <= ? ORDER BY as_of_date DESC, created_at DESC LIMIT ?",
             (ticker, as_of_date, limit),
         )
         rows = cursor.fetchall()
