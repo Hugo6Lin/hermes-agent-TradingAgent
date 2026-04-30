@@ -202,6 +202,18 @@ def _cmd_fundamental_quality_run(
     as_of_date: str | None,
     output_root: str,
 ) -> int:
+    # Validate date format before proceeding
+    effective_date = as_of_date
+    if effective_date is None:
+        # Will be resolved later from payload; skip CLI-level date check
+        pass
+    else:
+        try:
+            date.fromisoformat(effective_date)
+        except (ValueError, TypeError):
+            print(f"invalid fundamental-quality-run input: invalid date format '{effective_date}'")
+            return 2
+
     payload_path = Path(input_path).expanduser().resolve()
     if not payload_path.exists():
         print(f"invalid fundamental-quality-run input: file not found '{input_path}'")
@@ -216,6 +228,12 @@ def _cmd_fundamental_quality_run(
     if not isinstance(input_payload.get("tickers"), list):
         print("invalid fundamental-quality-run input: missing 'tickers' list")
         return 2
+
+    # Validate each ticker item is a dict
+    for i, item in enumerate(input_payload["tickers"]):
+        if not isinstance(item, dict):
+            print(f"invalid fundamental-quality-run input: ticker item {i} is not a dict")
+            return 2
 
     output_path = Path(output_root).expanduser()
     if not output_path.is_absolute():

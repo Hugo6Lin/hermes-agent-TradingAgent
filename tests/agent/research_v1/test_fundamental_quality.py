@@ -158,6 +158,25 @@ def test_source_hash_changes_on_middle_row_revision():
     assert compute_source_hash(base, "2026-04-30") != compute_source_hash(revised, "2026-04-30")
 
 
+def test_missing_required_fields_surfaces_exact_field_names():
+    rows = _rows()
+    # Remove shares_outstanding from the last two rows so they become unusable
+    rows[-1].pop("shares_outstanding")
+    rows[-2].pop("shares_outstanding")
+
+    report = build_fundamental_quality_report({
+        "ticker": "MISSING",
+        "sector": "technology",
+        "currency": "USD",
+        "rows": rows,
+    }, as_of_date="2026-04-30")
+
+    assert "missing_required_fields" in report["red_flags"]
+    assert "missing_required_fields" in report
+    assert isinstance(report["missing_required_fields"], list)
+    assert "shares_outstanding" in report["missing_required_fields"]
+
+
 # ── P38-B persistence and artifact tests ─────────────────────────────────────
 
 from agent.research_v1.data.database import ResearchDatabase
@@ -201,6 +220,28 @@ def test_revised_fundamental_source_hash_appends(tmp_path: Path):
 
     assert first != second
     assert len(rows) == 2
+
+
+def test_missing_required_fields_persists_in_database(tmp_path: Path):
+    db = _db(tmp_path)
+    rows = _rows()
+    rows[-1].pop("shares_outstanding")
+    rows[-2].pop("shares_outstanding")
+
+    report = build_fundamental_quality_report({
+        "ticker": "MISSING",
+        "sector": "technology",
+        "currency": "USD",
+        "rows": rows,
+    }, as_of_date="2026-04-30")
+
+    db.save_fundamental_quality_report(report)
+    stored = db.list_fundamental_quality_reports(ticker="MISSING", as_of_date="2026-04-30")
+
+    assert len(stored) == 1
+    import json as _json
+    persisted_fields = _json.loads(stored[0]["missing_required_fields_json"])
+    assert "shares_outstanding" in persisted_fields
 
 
 def test_fundamental_quality_artifacts_are_written(tmp_path: Path):

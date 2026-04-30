@@ -484,3 +484,45 @@ def test_fundamental_quality_run_cli_rejects_invalid_json(tmp_path, capsys):
 
     assert code == 2
     assert "invalid fundamental-quality-run input" in capsys.readouterr().out
+
+
+def test_fundamental_quality_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "fundamentals.json"
+    input_path.write_text('{"as_of_date":"2026-04-30","tickers":[]}', encoding="utf-8")
+
+    code = main([
+        "--app-root", str(app_root),
+        "fundamental-quality-run",
+        "--input", str(input_path),
+        "--as-of-date", "not-a-date",
+    ])
+
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "invalid fundamental-quality-run input" in out
+    assert "date" in out.lower()
+
+
+def test_fundamental_quality_run_cli_rejects_non_dict_ticker_item(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "fundamentals.json"
+    input_path.write_text('{"as_of_date":"2026-04-30","tickers":["AAPL"]}', encoding="utf-8")
+
+    code = main([
+        "--app-root", str(app_root),
+        "fundamental-quality-run",
+        "--input", str(input_path),
+        "--as-of-date", "2026-04-30",
+    ])
+
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "invalid fundamental-quality-run input" in out
+    assert "ticker" in out.lower()

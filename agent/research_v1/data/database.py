@@ -2026,6 +2026,7 @@ class ResearchDatabase:
                 latest_metrics_json TEXT NOT NULL,
                 trend_metrics_json TEXT NOT NULL,
                 red_flags_json TEXT NOT NULL,
+                missing_required_fields_json TEXT NOT NULL DEFAULT '[]',
                 warnings_json TEXT NOT NULL,
                 source_hash TEXT NOT NULL,
                 summary TEXT NOT NULL,
@@ -2050,8 +2051,8 @@ class ResearchDatabase:
                 status, quality_label, overall_quality_score,
                 confidence, coverage_ratio, usable_row_count, ignored_future_row_count,
                 dimension_scores_json, latest_metrics_json, trend_metrics_json,
-                red_flags_json, warnings_json, source_hash, summary
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                red_flags_json, missing_required_fields_json, warnings_json, source_hash, summary
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 report_id,
                 report["schema_version"],
@@ -2071,6 +2072,7 @@ class ResearchDatabase:
                 json.dumps(report.get("latest_metrics", {})),
                 json.dumps(report.get("trend_metrics", {})),
                 json.dumps(report.get("red_flags", [])),
+                json.dumps(report.get("missing_required_fields", [])),
                 json.dumps(report.get("warnings", [])),
                 report["source_hash"],
                 report.get("summary", ""),

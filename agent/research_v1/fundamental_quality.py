@@ -542,6 +542,7 @@ def build_fundamental_quality_report(
         "latest_metrics": latest_metrics,
         "trend_metrics": trend_metrics,
         "red_flags": red_flags,
+        "missing_required_fields": sorted(set(normalized.missing_required_fields)),
         "warnings": normalized.warnings,
         "source_hash": source_hash,
         "summary": " | ".join(summary_parts),
