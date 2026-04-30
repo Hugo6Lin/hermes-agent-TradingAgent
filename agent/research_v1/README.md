@@ -121,6 +121,10 @@ context rather than hidden.
 
 `market_data_readiness.py` checks whether the Futu SDK is installed, whether OpenD is reachable, and optionally verifies live snapshot/history/option-chain calls. It writes readiness artifacts under `output/governance/YYYY-MM-DD/`. The flow is one-way: P45 does not place orders, unlock trading, use trade contexts, query positions, invoke P36-P44 runtimes, or mutate research decisions.
 
+#### P46 Controlled Evidence Refresh Planner
+
+`evidence_refresh_planner.py` consumes the latest P44 freshness/drift monitor and P45 market-data readiness report, then writes a dry-run refresh plan under `output/governance/YYYY-MM-DD/`. The flow is one-way: P46 does not refresh evidence, call market-data providers, invoke P36-P45 runtimes, or mutate research decisions.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 

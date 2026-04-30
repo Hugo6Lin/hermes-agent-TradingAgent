@@ -626,6 +626,28 @@ Futu OpenD must be running locally (default `127.0.0.1:11111`). The Python
 runtime must have `futu-api>=10.4.6408` installed. Host and port can be
 overridden via `FUTU_OPEND_HOST` and `FUTU_OPEND_PORT` environment variables.
 
+### P46 Controlled Evidence Refresh Planner
+
+P46 consumes the latest P44 evidence freshness/drift monitor and P45 Futu
+market-data readiness report, then writes a dry-run refresh plan:
+
+```text
+output/governance/YYYY-MM-DD/p46_evidence_refresh_plan.json
+output/governance/YYYY-MM-DD/p46_evidence_refresh_plan.md
+```
+
+Example:
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli evidence-refresh-plan-run \
+  --as-of-date 2026-04-30 \
+  --lookback-days 14 \
+  --max-items 12
+```
+
+P46 does not refresh evidence, call market-data providers, schedule jobs, or
+mutate prior evidence. It only produces a manual plan.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -767,6 +789,14 @@ HERMES_LIVE_FUTU=1 /opt/homebrew/bin/python3.11 -m pytest \
   -q
 ```
 
+### P46 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_evidence_refresh_planner.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -841,6 +871,7 @@ Recent result:
   tests/agent/research_v1/test_copilot_console_index.py \
   tests/agent/research_v1/test_evidence_freshness_drift_monitor.py \
   tests/agent/research_v1/test_market_data_readiness.py \
+  tests/agent/research_v1/test_evidence_refresh_planner.py \
   -q
 ```
 
