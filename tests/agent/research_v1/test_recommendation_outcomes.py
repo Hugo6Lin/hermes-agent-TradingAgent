@@ -548,6 +548,77 @@ def test_non_evaluated_outcome_rows_are_persisted(tmp_path: Path):
     assert any(r["status"] == "not_applicable" for r in rows)
 
 
+def test_non_evaluated_action_revision_is_not_lost_as_duplicate(tmp_path: Path):
+    """P2 audit durability: if a signal's action changes from Watchlist to
+    No Trade (both not_applicable), the second run must append a new row
+    rather than being treated as a duplicate."""
+    db = _db(tmp_path)
+    task = _task()
+    signal = _signal()
+    db.save_research_task(task)
+    signal_id = db.save_canonical_signal(signal, task.task_id)
+
+    # First run: Watchlist
+    report_v1 = CanonicalReport(
+        title="AAPL v1",
+        executive_summary="summary",
+        bottom_line="line",
+        why_now="now",
+        bull_case="bull",
+        bear_case="bear",
+        trade_plan=None,
+        risk_watch=[],
+        key_evidence=[],
+        appendix={},
+        decision_card={"primary_action": "Watchlist"},
+        instrument_rec=None,
+        options_structure=None,
+        early_exit=None,
+    )
+    db.save_canonical_report(report_v1, task.task_id, "AAPL")
+    run_recommendation_outcome_tracking(
+        db=db,
+        evaluated_for_date=date(2026, 4, 30),
+        limit=10,
+        provider=FakeHistoryProvider(_rows()),
+    )
+
+    rows_v1 = db.list_canonical_outcomes_by_signal(signal_id)
+    assert len(rows_v1) == 3  # 3 horizons
+    assert all(r["action"] == "Watchlist" for r in rows_v1)
+
+    # Second run: No Trade (revised canonical report for same task)
+    report_v2 = CanonicalReport(
+        title="AAPL v2",
+        executive_summary="summary",
+        bottom_line="line",
+        why_now="now",
+        bull_case="bull",
+        bear_case="bear",
+        trade_plan=None,
+        risk_watch=[],
+        key_evidence=[],
+        appendix={},
+        decision_card={"primary_action": "No Trade"},
+        instrument_rec=None,
+        options_structure=None,
+        early_exit=None,
+    )
+    db.save_canonical_report(report_v2, task.task_id, "AAPL")
+    run_recommendation_outcome_tracking(
+        db=db,
+        evaluated_for_date=date(2026, 4, 30),
+        limit=10,
+        provider=FakeHistoryProvider(_rows()),
+    )
+
+    rows_v2 = db.list_canonical_outcomes_by_signal(signal_id)
+    # Must have 6 rows: 3 from Watchlist + 3 from No Trade
+    assert len(rows_v2) == 6
+    actions = {r["action"] for r in rows_v2}
+    assert actions == {"Watchlist", "No Trade"}
+
+
 def test_artifact_writer_handles_distribution_summary_with_mean_values(tmp_path: Path):
     """P2-2: Markdown writer must not crash when distribution rows have
     non-None mean_win/mean_loss values."""

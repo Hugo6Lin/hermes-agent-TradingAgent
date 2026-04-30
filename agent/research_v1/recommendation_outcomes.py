@@ -398,9 +398,22 @@ def _emit_all_horizons(
 ) -> list[dict]:
     cost_basis = COST_BASIS_FLAT_BPS if flat_cost_bps > 0 else COST_BASIS_NONE
     # Deterministic hash so non-evaluated rows satisfy the natural-key
-    # UNIQUE constraint and can be persisted.
-    status_hash = hashlib.sha256(
-        f"status:{status}".encode("utf-8")
+    # UNIQUE constraint and can be persisted.  Includes action-level
+    # fields so that action revisions (e.g. Watchlist -> No Trade) are
+    # not collapsed into a single duplicate.
+    no_price_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "schema_version": P36_SCHEMA_VERSION,
+                "status": status,
+                "action": action,
+                "ticker": ticker,
+                "calendar": calendar,
+                "entry_rule": P36_ENTRY_RULE_NEXT_OPEN,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
     ).hexdigest()
     return [
         {
@@ -432,7 +445,7 @@ def _emit_all_horizons(
             "cost_bps": flat_cost_bps,
             "data_source": "",
             "price_adjustment": PRICE_ADJUSTMENT_UNKNOWN,
-            "data_source_hash": status_hash,
+            "data_source_hash": no_price_hash,
             "path_precision": PATH_PRECISION_CLOSE_ONLY,
             "evaluated_for_date": str(evaluated_for_date),
             "evaluated_at": evaluated_at,
