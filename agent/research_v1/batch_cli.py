@@ -23,6 +23,7 @@ from agent.research_v1.market_data_readiness import run_market_data_readiness
 from agent.research_v1.research_context_pack import run_research_context_pack
 from agent.research_v1.research_context_prompt_pack import run_research_context_prompt_pack
 from agent.research_v1.boss_preview_runner import run_boss_preview
+from agent.research_v1.boss_pdf_brief_renderer import run_boss_pdf_brief
 from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
@@ -866,6 +867,45 @@ def _cmd_boss_preview_run(
     return 0
 
 
+def _cmd_boss_pdf_brief_run(
+    paths: HermesPaths,
+    preview_dir: str,
+    ticker: str,
+    output_dir: str | None,
+    title: str | None,
+    max_pages: int,
+    no_pdf: bool,
+) -> int:
+    preview_path = Path(preview_dir).expanduser()
+    if not preview_path.is_absolute():
+        preview_path = paths.app_root / preview_path
+    out_path = None
+    if output_dir:
+        out_path = Path(output_dir).expanduser()
+        if not out_path.is_absolute():
+            out_path = paths.app_root / out_path
+    result = run_boss_pdf_brief(
+        preview_dir=preview_path.resolve(),
+        ticker=ticker,
+        output_dir=out_path.resolve() if out_path is not None else None,
+        title=title,
+        max_pages=max_pages,
+        render_pdf=not no_pdf,
+    )
+    if result.get("status") == "boss_pdf_brief_blocked_invalid_input":
+        print(f"invalid boss-pdf-brief-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Boss PDF brief status: {result['status']}")
+    print(f"Ticker: {result.get('ticker', ticker)}")
+    print(f"HTML: {result.get('html_path', '')}")
+    print(f"PDF: {result.get('pdf_path', '') or 'not generated'}")
+    print(f"Manifest: {result.get('manifest_path', '')}")
+    print(f"Verdict: {result.get('verdict', '')}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -1060,6 +1100,14 @@ def build_parser() -> argparse.ArgumentParser:
     preview_parser.add_argument("--no-live", dest="live", action="store_false", help="Disable live Futu calls.")
     preview_parser.add_argument("--max-candidates", default=8, type=int, help="Maximum preview candidates.")
 
+    pdf_brief_parser = subparsers.add_parser("boss-pdf-brief-run", help="Render a boss-facing PDF brief from a P49 preview directory.")
+    pdf_brief_parser.add_argument("--preview-dir", required=True)
+    pdf_brief_parser.add_argument("--ticker", required=True)
+    pdf_brief_parser.add_argument("--output-dir", default=None)
+    pdf_brief_parser.add_argument("--title", default=None)
+    pdf_brief_parser.add_argument("--max-pages", type=int, default=3)
+    pdf_brief_parser.add_argument("--no-pdf", action="store_true")
+
     return parser
 
 
@@ -1211,6 +1259,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             governance_root=args.governance_root,
             live=args.live,
             max_candidates=args.max_candidates,
+        )
+    if args.command == "boss-pdf-brief-run":
+        return _cmd_boss_pdf_brief_run(
+            paths,
+            preview_dir=args.preview_dir,
+            ticker=args.ticker,
+            output_dir=args.output_dir,
+            title=args.title,
+            max_pages=args.max_pages,
+            no_pdf=args.no_pdf,
         )
 
     parser.print_help()

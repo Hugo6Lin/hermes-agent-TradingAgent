@@ -1249,3 +1249,60 @@ def test_boss_preview_run_cli_supports_no_live(monkeypatch, tmp_path, capsys):
     code = main(["--app-root", str(tmp_path), "boss-preview-run", "--tickers", "NVDA", "--as-of-date", "2026-05-01", "--no-live"])
     assert code == 0
     assert captured["live"] is False
+
+
+# --- P50 CLI tests ---
+
+
+def test_boss_pdf_brief_run_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    preview_dir = tmp_path / "preview" / "2026-05-01"
+    preview_dir.mkdir(parents=True)
+
+    def fake_run(**kwargs):
+        html = preview_dir / "ZETA_BOSS_BRIEF.html"
+        pdf = preview_dir / "ZETA_BOSS_BRIEF.pdf"
+        manifest = preview_dir / "ZETA_BOSS_BRIEF.json"
+        html.write_text("<html></html>", encoding="utf-8")
+        pdf.write_bytes(b"%PDF-1.4\n")
+        manifest.write_text("{}", encoding="utf-8")
+        return {
+            "status": "boss_pdf_brief_ready",
+            "ticker": kwargs["ticker"],
+            "html_path": str(html),
+            "pdf_path": str(pdf),
+            "manifest_path": str(manifest),
+            "verdict": "Usable preview, not decision-grade yet.",
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_pdf_brief", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-pdf-brief-run",
+        "--preview-dir", str(preview_dir),
+        "--ticker", "ZETA",
+    ])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Boss PDF brief status: boss_pdf_brief_ready" in out
+    assert "PDF:" in out
+
+
+def test_boss_pdf_brief_run_cli_invalid_input_returns_2(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        return {"status": "boss_pdf_brief_blocked_invalid_input", "warnings": ["preview_dir_missing"]}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_pdf_brief", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-pdf-brief-run",
+        "--preview-dir", str(tmp_path / "missing"),
+        "--ticker", "ZETA",
+    ])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "invalid boss-pdf-brief-run input" in out
