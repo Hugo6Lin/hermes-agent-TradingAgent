@@ -2,6 +2,14 @@
 
 P50 reads existing P49 preview artifacts and renders a visual boss brief. It
 does not run research, call providers, instruct trades, or change decisions.
+
+P55 applies the V2.1 brief preview language to the rendered HTML/PDF:
+
+* paper-memo letterhead and editorial spacing
+* a top "10-second read" executive strip (verdict / price context / trusted
+  evidence / evidence gaps / next review action)
+* an evidence-gaps section that is always visible — never collapsed
+* PDF-safe typography fallbacks (Georgia / system-ui / ui-monospace)
 """
 
 from __future__ import annotations
@@ -9,7 +17,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import tempfile
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -49,6 +56,14 @@ FORBIDDEN_MAIN_BODY_TERMS = (
     "provider_ready",
     "degraded_missing_inputs",
     "prompt_pack_limited",
+    "buy this now",
+    "sell this now",
+    "follow this trade",
+    "guaranteed edge",
+    "production approved",
+    "model promoted",
+    "place order",
+    "submit order",
 )
 
 
@@ -192,6 +207,53 @@ def _candidate_summary(p39: dict[str, Any], ticker: str) -> dict[str, Any]:
     return {"ticker": ticker, "rank": None, "score": None, "category": "unavailable"}
 
 
+_EVIDENCE_MATRIX_ROWS = [
+    ("P45", "p45_market_data_readiness", "Live Data"),
+    ("P37", "p37_market_regime_snapshot", "Market Regime"),
+    ("P38", "p38_fundamental_quality", "Fundamentals"),
+    ("P39", "p39_candidate_pool", "Candidates"),
+    ("P40", "p40_research_memory_pack", "Memory"),
+    ("P41", "p41_decision_journal", "Guardrails"),
+    ("P42", "p42_boss_copilot_daily_brief", "Daily Brief"),
+    ("P44", "p44_evidence_freshness_drift_monitor", "Evidence Monitor"),
+    ("P46", "p46_evidence_refresh_plan", "Refresh Plan"),
+    ("P47", "p47_research_context_pack", "Context Pack"),
+    ("P48", "p48_research_context_prompt_pack", "Prompt Pack"),
+]
+
+
+def _evidence_gap_status(artifacts: dict[str, Any], key: str, load_warnings: list[str]) -> str:
+    if any(w == f"missing:{key}.json" for w in load_warnings):
+        return "Missing"
+    if any(w.startswith(f"invalid_json:{key}") for w in load_warnings):
+        return "Blocked"
+    payload = artifacts.get(key)
+    if not isinstance(payload, dict):
+        return "Missing"
+    status = str(payload.get("status", ""))
+    if status.startswith("blocked"):
+        return "Blocked"
+    if status in ("completed", "brief_ready", "provider_ready", "monitor_green"):
+        return "Ready"
+    if status == "monitor_red":
+        return "Limited"
+    if status == "monitor_yellow":
+        return "Limited"
+    if payload.get("_preview_sample") or "preview_sample" in status:
+        return "Sample"
+    if status:
+        return "Limited"
+    return "Missing"
+
+
+def _build_evidence_gaps(artifacts: dict[str, Any], load_warnings: list[str]) -> list[dict[str, Any]]:
+    gaps = []
+    for phase_id, key, label in _EVIDENCE_MATRIX_ROWS:
+        status = _evidence_gap_status(artifacts, key, load_warnings)
+        gaps.append({"phase": phase_id, "label": label, "status": status})
+    return gaps
+
+
 def classify_boss_brief(
     artifacts: dict[str, Any],
     ticker: str,
@@ -224,6 +286,7 @@ def classify_boss_brief(
         not_decision_grade.append("Fundamental/candidate/guardrail evidence includes preview sample inputs.")
     if p44.get("status") == "monitor_red":
         not_decision_grade.append("Evidence monitor is red; outcome history or context is missing.")
+    evidence_gaps = _build_evidence_gaps(artifacts, warnings)
     source_seed = {"ticker": normalized_ticker, "artifacts": artifacts, "warnings": warnings}
     return {
         "schema_version": P50_SCHEMA_VERSION,
@@ -239,6 +302,7 @@ def classify_boss_brief(
         "evidence_base_status": evidence_status,
         "guardrail_status": guardrail_status,
         "candidate": candidate,
+        "evidence_gaps": evidence_gaps,
         "trusted_points": trusted,
         "not_decision_grade_points": not_decision_grade,
         "next_actions": [
@@ -270,96 +334,450 @@ def _score_pct(value: Any) -> int:
 
 
 def _badge_class(value: str) -> str:
-    lower = value.lower()
+    lower = (value or "").lower()
     if "ready" in lower or lower == "clear":
         return "ready"
     if "blocked" in lower or "missing" in lower:
         return "blocked"
     if "preview" in lower or "incomplete" in lower or "caution" in lower or "limited" in lower:
         return "limited"
+    if "stale" in lower:
+        return "stale"
     return "sample"
+
+
+def _evidence_matrix_html(gaps: list[dict[str, Any]]) -> str:
+    rows = []
+    for gap in gaps:
+        status = gap.get("status", "Missing")
+        label = gap.get("label", "")
+        badge_cls = _badge_class(status)
+        rows.append(
+            f'<tr><td>{escape(label)}</td>'
+            f'<td><span class="badge {badge_cls}">{escape(status)}</span></td></tr>'
+        )
+    return "".join(rows)
+
+
+def _evidence_gaps_detail_html(gaps: list[dict[str, Any]]) -> str:
+    """Render the always-visible evidence-gaps detail table.
+
+    Per V2.1 brief preview, evidence gaps must remain visible — never
+    collapsed — and must surface a one-line reason when possible.
+    """
+
+    rows = []
+    for gap in gaps:
+        status = gap.get("status", "Missing")
+        if status == "Ready":
+            continue
+        label = gap.get("label", "")
+        badge_cls = _badge_class(status)
+        if status == "Missing":
+            reason = "Phase artifact not produced for this preview."
+        elif status == "Blocked":
+            reason = "Phase artifact present but reports a blocked state."
+        elif status == "Sample":
+            reason = "Preview sample inputs used — not decision-grade."
+        elif status == "Limited":
+            reason = "Phase produced but evidence is partial or degraded."
+        else:
+            reason = "Evidence is not in a ready state."
+        rows.append(
+            f'<tr>'
+            f'<td><span class="badge {badge_cls}">{escape(status)}</span></td>'
+            f'<td class="gap-label">{escape(label)}</td>'
+            f'<td class="gap-reason">{escape(reason)}</td>'
+            f'</tr>'
+        )
+    if not rows:
+        return (
+            '<tr><td colspan="3" class="gap-reason" '
+            'style="color: var(--text-muted, #6b7785);">'
+            'No outstanding evidence gaps detected.</td></tr>'
+        )
+    return "".join(rows)
+
+
+def _ten_second_read(brief: dict[str, Any]) -> str:
+    """Render the V2.1 top-third "10-second read" executive strip.
+
+    Five cells, top to bottom of the brief:
+      Verdict · Price context · Trusted evidence · Evidence gaps · Next review
+    """
+
+    gaps = brief.get("evidence_gaps", []) or []
+    ready_count = sum(1 for g in gaps if g.get("status") == "Ready")
+    gap_count = sum(1 for g in gaps if g.get("status") != "Ready")
+    total = len(gaps)
+    verdict = brief.get("verdict", "")
+    live = brief.get("live_data_status", "Missing")
+    regime_label = str(brief.get("market_regime_label", "Unavailable"))
+    regime_confidence = _score_pct(brief.get("market_regime_confidence"))
+    next_actions = brief.get("next_actions", []) or []
+    next_review = next_actions[0] if next_actions else "Refresh evidence and re-grade."
+
+    live_badge_cls = _badge_class(live)
+    gap_badge_cls = "blocked" if gap_count else "ready"
+
+    return f"""
+    <section class="ten-second-read" aria-label="10-second read">
+      <div class="cell">
+        <div class="meta">Verdict</div>
+        <div class="value verdict-text">{escape(verdict)}</div>
+      </div>
+      <div class="cell">
+        <div class="meta">Price context</div>
+        <div class="value mono"><span class="badge {live_badge_cls}">{escape(live)}</span></div>
+        <div class="sub mono">Regime: {escape(regime_label)} · {regime_confidence}%</div>
+      </div>
+      <div class="cell">
+        <div class="meta">Trusted evidence</div>
+        <div class="value mono">{ready_count} of {total}</div>
+        <div class="sub mono">Phases marked Ready</div>
+      </div>
+      <div class="cell">
+        <div class="meta">Evidence gaps</div>
+        <div class="value mono"><span class="badge {gap_badge_cls}">{gap_count} visible</span></div>
+        <div class="sub mono">Detail below — not collapsed</div>
+      </div>
+      <div class="cell">
+        <div class="meta">Next review action</div>
+        <div class="value next-review">{escape(next_review)}</div>
+      </div>
+    </section>
+    """
+
+
+# ---------------------------------------------------------------------------
+# Stylesheet — PDF-safe, single-file inline.
+# ---------------------------------------------------------------------------
+
+_BRIEF_STYLE = """
+@page { size: Letter; margin: 0.55in; }
+:root {
+  --paper-bg: #fffaf0;
+  --paper-deep: #fdf2dc;
+  --ink: #1c1916;
+  --secondary: #564f47;
+  --muted: #6b7785;
+  --border-soft: rgba(36, 33, 31, 0.10);
+  --border-strong: rgba(36, 33, 31, 0.25);
+  --accent-rust: #b5543e;
+  --accent-blue: #2878bd;
+  --status-ready: #2f7a55;
+  --status-ready-bg: rgba(47, 122, 85, 0.10);
+  --status-ready-border: rgba(47, 122, 85, 0.25);
+  --status-limited: #b07a1f;
+  --status-limited-bg: rgba(176, 122, 31, 0.12);
+  --status-limited-border: rgba(176, 122, 31, 0.28);
+  --status-blocked: #a13d3d;
+  --status-blocked-bg: rgba(161, 61, 61, 0.10);
+  --status-blocked-border: rgba(161, 61, 61, 0.26);
+  --status-sample: #5d6573;
+  --status-sample-bg: rgba(93, 101, 115, 0.10);
+  --status-sample-border: rgba(93, 101, 115, 0.24);
+  --status-stale: #876733;
+  --status-stale-bg: rgba(135, 103, 51, 0.10);
+  --status-stale-border: rgba(135, 103, 51, 0.26);
+  --font-display: Georgia, "Times New Roman", "Iowan Old Style", serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-data: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: var(--font-ui);
+  color: var(--ink);
+  margin: 0;
+  background: #1f1c18;
+}
+main {
+  max-width: 920px;
+  margin: 0 auto;
+  background: var(--paper-bg);
+  padding: 48px 56px;
+  background-image: radial-gradient(120% 80% at 0% 0%, #fff8ea 0%, var(--paper-bg) 100%);
+}
+.letterhead {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 12px;
+}
+.letterhead .wordmark {
+  font-family: var(--font-display);
+  font-size: 32px; font-weight: 500; letter-spacing: -0.02em;
+  margin: 0;
+}
+.letterhead .memo-tag {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--secondary);
+  margin-top: 4px;
+}
+.letterhead .paper-meta {
+  text-align: right;
+  font-family: var(--font-data);
+  font-size: 11px; color: var(--muted);
+}
+.letterhead .paper-meta div { margin-bottom: 2px; }
+
+.subject {
+  display: grid; grid-template-columns: 1fr auto;
+  gap: 24px; align-items: flex-end;
+  margin-top: 24px;
+}
+.subject .meta-label {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.subject h1 {
+  font-family: var(--font-display);
+  font-size: 36px; font-weight: 500; letter-spacing: -0.02em;
+  margin: 4px 0 0;
+}
+.subject .as-of {
+  font-family: var(--font-data); font-size: 12px; color: var(--muted);
+  text-align: right;
+}
+
+.ten-second-read {
+  margin-top: 24px;
+  padding: 16px 18px;
+  background: linear-gradient(180deg, #fff8e8 0%, var(--paper-deep) 100%);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr 1fr 1.4fr;
+  gap: 14px;
+}
+.ten-second-read .cell {
+  border-right: 1px solid var(--border-soft);
+  padding-right: 12px;
+}
+.ten-second-read .cell:last-child { border-right: 0; padding-right: 0; }
+.ten-second-read .meta {
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.ten-second-read .value {
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 500;
+  margin-top: 4px; line-height: 1.3;
+}
+.ten-second-read .value.mono { font-family: var(--font-data); font-size: 14px; font-weight: 600; }
+.ten-second-read .sub {
+  font-size: 11px; color: var(--muted); margin-top: 4px;
+}
+
+.verdict {
+  font-size: 18px; font-weight: 700;
+  padding: 14px 16px;
+  background: rgba(40, 120, 189, 0.08);
+  border-left: 5px solid var(--accent-blue);
+  margin: 22px 0 16px;
+}
+
+.status-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+}
+.card {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px; padding: 12px;
+  background: white;
+}
+.label {
+  color: var(--muted); font-size: 11px;
+  text-transform: uppercase; font-weight: 700; letter-spacing: 0.06em;
+}
+.score-bar {
+  height: 8px; background: rgba(36,33,31,0.08);
+  border-radius: 999px; overflow: hidden; margin-top: 8px;
+}
+.score-fill {
+  height: 100%; background: var(--accent-blue);
+  width: var(--score, 0%);
+}
+
+.split {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  margin-top: 12px;
+}
+
+.evidence-gaps-detail {
+  border: 1px solid var(--status-limited-border);
+  background: var(--status-limited-bg);
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+.evidence-gaps-detail h2 { margin: 0 0 8px; }
+.evidence-gaps-detail table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.evidence-gaps-detail td { padding: 7px 8px; vertical-align: top; }
+.evidence-gaps-detail .gap-label { font-weight: 600; }
+.evidence-gaps-detail .gap-reason { color: var(--secondary); }
+
+.evidence-matrix { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+.evidence-matrix td { border-bottom: 1px solid var(--border-soft); padding: 7px 8px; }
+.evidence-matrix td:first-child { font-weight: 600; width: 220px; }
+
+h2 {
+  font-family: var(--font-display);
+  font-size: 18px; font-weight: 500; letter-spacing: -0.005em;
+  margin: 26px 0 8px;
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 4px;
+}
+
+ul, ol { margin-top: 8px; padding-left: 20px; }
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  font-family: var(--font-ui);
+}
+.badge.ready    { color: var(--status-ready);   background: var(--status-ready-bg);   border-color: var(--status-ready-border); }
+.badge.limited  { color: var(--status-limited); background: var(--status-limited-bg); border-color: var(--status-limited-border); }
+.badge.blocked  { color: var(--status-blocked); background: var(--status-blocked-bg); border-color: var(--status-blocked-border); }
+.badge.sample   { color: var(--status-sample);  background: var(--status-sample-bg);  border-color: var(--status-sample-border); }
+.badge.stale    { color: var(--status-stale);   background: var(--status-stale-bg);   border-color: var(--status-stale-border); }
+
+.appendix { page-break-before: always; }
+.disclaimer {
+  font-size: 10.5px; color: var(--muted); margin-top: 22px;
+}
+.footer-rule {
+  margin-top: 28px; padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 10.5px; color: var(--muted);
+  letter-spacing: 0.04em;
+  display: flex; justify-content: space-between;
+}
+@media print {
+  body { background: white; }
+  main { box-shadow: none; padding: 0; }
+}
+"""
 
 
 def render_boss_brief_html(brief: dict[str, Any]) -> str:
     ticker = escape(brief["ticker"])
-    title = f"{ticker} Boss Brief"
+    title = escape(brief.get("title") or f"{ticker} Boss Brief")
     candidate = brief.get("candidate", {})
     candidate_score = _score_pct(candidate.get("score"))
     regime_confidence = _score_pct(brief.get("market_regime_confidence"))
-    trusted_items = "".join(f"<li>{escape(item)}</li>" for item in brief.get("trusted_points", [])) or "<li>No trusted points available.</li>"
-    limited_items = "".join(f"<li>{escape(item)}</li>" for item in brief.get("not_decision_grade_points", [])) or "<li>No major evidence gaps detected.</li>"
-    next_actions = "".join(f"<li>{escape(item)}</li>" for item in brief.get("next_actions", []))
+    trusted_items = "".join(
+        f"<li>{escape(item)}</li>" for item in brief.get("trusted_points", [])
+    ) or "<li>No trusted points available.</li>"
+    limited_items = "".join(
+        f"<li>{escape(item)}</li>" for item in brief.get("not_decision_grade_points", [])
+    ) or "<li>No major evidence gaps detected.</li>"
+    next_actions_html = "".join(
+        f"<li>{escape(item)}</li>" for item in brief.get("next_actions", [])
+    )
     phases = "".join(
         f"<tr><td>{escape(str(k))}</td><td>{escape(str(v))}</td></tr>"
         for k, v in brief.get("phase_statuses", {}).items()
     )
+    evidence_gaps = brief.get("evidence_gaps", []) or []
+    evidence_matrix = _evidence_matrix_html(evidence_gaps)
+    evidence_gaps_detail = _evidence_gaps_detail_html(evidence_gaps)
+    ten_second_read = _ten_second_read(brief)
+
     html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <title>{title}</title>
-  <style>
-    @page {{ size: Letter; margin: 0.45in; }}
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #17202a; margin: 0; background: #f4f6f8; }}
-    main {{ max-width: 980px; margin: 0 auto; background: white; padding: 28px; }}
-    h1 {{ font-size: 30px; margin: 0 0 4px; letter-spacing: 0; }}
-    h2 {{ font-size: 17px; margin: 22px 0 10px; border-bottom: 1px solid #d9e1e8; padding-bottom: 6px; }}
-    .subtitle {{ color: #566573; margin-bottom: 18px; }}
-    .verdict {{ font-size: 20px; font-weight: 700; padding: 14px 16px; background: #eef6ff; border-left: 5px solid #2878bd; margin: 16px 0; }}
-    .grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }}
-    .card {{ border: 1px solid #d9e1e8; border-radius: 8px; padding: 12px; background: #fbfcfd; }}
-    .label {{ color: #6b7785; font-size: 11px; text-transform: uppercase; font-weight: 700; }}
-    .badge {{ display: inline-block; border-radius: 999px; padding: 5px 9px; font-size: 12px; font-weight: 700; margin-top: 8px; }}
-    .ready {{ background: #e8f7ef; color: #176b3a; }}
-    .limited {{ background: #fff5df; color: #875a00; }}
-    .blocked {{ background: #fdeaea; color: #9b1c1c; }}
-    .sample {{ background: #edf0f7; color: #344563; }}
-    .split {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }}
-    .score-bar {{ height: 10px; background: #e5e9ef; border-radius: 999px; overflow: hidden; margin-top: 8px; }}
-    .score-fill {{ height: 100%; background: #2f80ed; width: var(--score); }}
-    table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-    td, th {{ border-bottom: 1px solid #e5e9ef; text-align: left; padding: 7px; }}
-    ul {{ margin-top: 8px; padding-left: 20px; }}
-    .appendix {{ page-break-before: always; }}
-    .disclaimer {{ font-size: 11px; color: #6b7785; margin-top: 20px; }}
-    @media print {{ body {{ background: white; }} main {{ padding: 0; }} .appendix {{ page-break-before: always; }} }}
-  </style>
+  <style>{_BRIEF_STYLE}</style>
 </head>
 <body>
 <main>
-  <section>
-    <h1>{title}</h1>
-    <div class="subtitle">As of {escape(str(brief.get("as_of_date", "")))} · Generated {escape(str(brief.get("created_at", "")))}</div>
-    <div class="verdict">{escape(brief.get("verdict", ""))}</div>
-    <div class="grid">
-      <div class="card"><div class="label">Live Data</div><span class="badge {_badge_class(brief.get("live_data_status", ""))}">{escape(brief.get("live_data_status", ""))}</span></div>
-      <div class="card"><div class="label">Market Regime</div><strong>{escape(str(brief.get("market_regime_label", "Unavailable")))}</strong><div class="score-bar"><div class="score-fill" style="--score:{regime_confidence}%"></div></div></div>
-      <div class="card"><div class="label">Evidence Base</div><span class="badge {_badge_class(brief.get("evidence_base_status", ""))}">{escape(brief.get("evidence_base_status", ""))}</span></div>
-      <div class="card"><div class="label">Guardrails</div><span class="badge {_badge_class(brief.get("guardrail_status", ""))}">{escape(brief.get("guardrail_status", ""))}</span></div>
+  <header class="letterhead">
+    <div>
+      <div class="wordmark">Hermes</div>
+      <div class="memo-tag">Boss brief · single-name memo</div>
     </div>
-    <h2>Candidate Snapshot</h2>
-    <div class="card">
-      <strong>{escape(str(candidate.get("ticker", ticker)))}</strong> · Rank {escape(str(candidate.get("rank") or "n/a"))} · {escape(str(candidate.get("category", "unavailable")))}
-      <div class="score-bar"><div class="score-fill" style="--score:{candidate_score}%"></div></div>
+    <div class="paper-meta">
+      <div>{escape(str(brief.get("brief_id", "")))}</div>
+      <div>As of {escape(str(brief.get("as_of_date", "")))}</div>
+      <div>Generated {escape(str(brief.get("created_at", "")))}</div>
+    </div>
+  </header>
+
+  <section class="subject">
+    <div>
+      <div class="meta-label">Subject</div>
+      <h1>{title}</h1>
+    </div>
+    <div class="as-of">
+      <div class="meta-label">Status</div>
+      <span class="badge {_badge_class(brief.get("evidence_base_status", ""))}">{escape(brief.get("evidence_base_status", ""))}</span>
     </div>
   </section>
-  <section>
-    <h2>Trusted vs Not Decision-Grade Yet</h2>
-    <div class="split">
-      <div class="card"><h3>Trusted</h3><ul>{trusted_items}</ul></div>
-      <div class="card"><h3>Not Decision-Grade Yet</h3><ul>{limited_items}</ul></div>
-    </div>
-    <h2>Next Actions</h2>
-    <div class="card"><ul>{next_actions}</ul></div>
+
+  {ten_second_read}
+
+  <div class="verdict">{escape(brief.get("verdict", ""))}</div>
+
+  <section class="status-grid">
+    <div class="card"><div class="label">Live Data</div><div style="margin-top:6px;"><span class="badge {_badge_class(brief.get("live_data_status", ""))}">{escape(brief.get("live_data_status", ""))}</span></div></div>
+    <div class="card"><div class="label">Market Regime</div><strong style="display:block; margin-top:6px;">{escape(str(brief.get("market_regime_label", "Unavailable")))}</strong><div class="score-bar"><div class="score-fill" style="--score:{regime_confidence}%"></div></div></div>
+    <div class="card"><div class="label">Evidence Base</div><div style="margin-top:6px;"><span class="badge {_badge_class(brief.get("evidence_base_status", ""))}">{escape(brief.get("evidence_base_status", ""))}</span></div></div>
+    <div class="card"><div class="label">Guardrails</div><div style="margin-top:6px;"><span class="badge {_badge_class(brief.get("guardrail_status", ""))}">{escape(brief.get("guardrail_status", ""))}</span></div></div>
   </section>
-  <section class="appendix">
-    <h2>Appendix: Phase Status</h2>
-    <table><tbody>{phases}</tbody></table>
-    <p class="disclaimer">{escape(brief.get("disclaimer", P50_DISCLAIMER))}</p>
-  </section>
+
+  <h2>Candidate snapshot</h2>
+  <div class="card">
+    <strong>{escape(str(candidate.get("ticker", ticker)))}</strong> · Rank {escape(str(candidate.get("rank") or "n/a"))} · {escape(str(candidate.get("category", "unavailable")))}
+    <div class="score-bar"><div class="score-fill" style="--score:{candidate_score}%"></div></div>
+  </div>
+
+  <h2>Trusted vs Not Decision-Grade Yet</h2>
+  <div class="split">
+    <div class="card"><h3 style="margin:0 0 6px;">Trusted</h3><ul>{trusted_items}</ul></div>
+    <div class="card"><h3 style="margin:0 0 6px;">Not Decision-Grade Yet</h3><ul>{limited_items}</ul></div>
+  </div>
+
+  <h2>Evidence gaps · do not hide</h2>
+  <div class="evidence-gaps-detail">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left; font-size:10.5px; color: var(--muted); text-transform:uppercase; letter-spacing:0.06em; padding-bottom:6px;">Status</th>
+          <th style="text-align:left; font-size:10.5px; color: var(--muted); text-transform:uppercase; letter-spacing:0.06em; padding-bottom:6px;">Pillar</th>
+          <th style="text-align:left; font-size:10.5px; color: var(--muted); text-transform:uppercase; letter-spacing:0.06em; padding-bottom:6px;">Reason</th>
+        </tr>
+      </thead>
+      <tbody>{evidence_gaps_detail}</tbody>
+    </table>
+  </div>
+
+  <h2>Next Actions</h2>
+  <div class="card"><ol>{next_actions_html}</ol></div>
+
+  <h2>Evidence Matrix</h2>
+  <table class="evidence-matrix"><tbody>{evidence_matrix}</tbody></table>
+
+  <div class="footer-rule">
+    <span>Hermes · single-name memo · for boss desk only</span>
+    <span>{escape(str(brief.get("brief_id", "")))}</span>
+  </div>
 </main>
+
+<section class="appendix">
+  <main>
+    <h2>Appendix · Phase Status</h2>
+    <table class="evidence-matrix"><tbody>{phases}</tbody></table>
+    <p class="disclaimer">{escape(brief.get("disclaimer", P50_DISCLAIMER))}</p>
+  </main>
+</section>
 </body>
 </html>"""
+
     main_body = html.split('<section class="appendix">', 1)[0]
     for term in FORBIDDEN_MAIN_BODY_TERMS:
         if term in main_body:
