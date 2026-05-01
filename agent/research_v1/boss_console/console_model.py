@@ -74,12 +74,14 @@ def _report_from_dir(day_dir: Path, tickers: list[str] | None) -> dict[str, Any]
 
 def _evidence_health(preview_dirs: list[Path]) -> dict[str, Any]:
     statuses = []
-    missing = []
+    missing: list[str] = []
     for day_dir in preview_dirs:
         monitor = _read_json(day_dir / "p44_evidence_freshness_drift_monitor.json") or {}
         if monitor:
             statuses.append(monitor.get("status", "unknown"))
-            missing.extend(monitor.get("missing_context_patterns") or [])
+            for item in (monitor.get("missing_context_patterns") or []):
+                if isinstance(item, str):
+                    missing.append(item)
     if "monitor_red" in statuses:
         overall = "monitor_red"
     elif statuses:
