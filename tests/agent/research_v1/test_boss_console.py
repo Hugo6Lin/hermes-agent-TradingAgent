@@ -104,3 +104,168 @@ def test_console_runtime_blocks_invalid_governance_root(tmp_path: Path):
     result = run_boss_console(tmp_path / "missing", tmp_path / "console")
     assert result["status"] == "boss_console_blocked_invalid_input"
     assert "governance_root_missing" in result["warnings"]
+
+
+# ---------------------------------------------------------------------------
+# P51 review fix 1: multiple *_BOSS_BRIEF.json files per preview directory
+# ---------------------------------------------------------------------------
+
+def _multi_brief_governance_root(tmp_path: Path) -> Path:
+    day = tmp_path / "governance" / "2026-05-01"
+    _write_json(day / "boss_preview.json", {
+        "schema_version": "p49_boss_preview.1",
+        "status": "boss_preview_ready",
+        "as_of_date": "2026-05-01",
+        "tickers": ["ZETA", "AAPL"],
+        "live_status": "provider_ready",
+        "top_candidates": ["ZETA", "AAPL"],
+        "warnings": [],
+    })
+    _write_json(day / "ZETA_BOSS_BRIEF.json", {
+        "status": "boss_pdf_brief_ready",
+        "ticker": "ZETA",
+        "verdict": "ZETA verdict.",
+        "live_data_status": "Ready",
+        "evidence_base_status": "Preview-only / Incomplete",
+        "guardrail_status": "Caution",
+        "html_path": str(day / "ZETA_BOSS_BRIEF.html"),
+        "pdf_path": str(day / "ZETA_BOSS_BRIEF.pdf"),
+    })
+    _write_json(day / "AAPL_BOSS_BRIEF.json", {
+        "status": "boss_pdf_brief_ready",
+        "ticker": "AAPL",
+        "verdict": "AAPL verdict.",
+        "live_data_status": "Ready",
+        "evidence_base_status": "Decision-grade",
+        "guardrail_status": "Clear",
+        "html_path": str(day / "AAPL_BOSS_BRIEF.html"),
+        "pdf_path": str(day / "AAPL_BOSS_BRIEF.pdf"),
+    })
+    (day / "ZETA_BOSS_BRIEF.pdf").write_bytes(b"%PDF-1.4\n%stub\n")
+    (day / "AAPL_BOSS_BRIEF.pdf").write_bytes(b"%PDF-1.4\n%stub\n")
+    return tmp_path / "governance"
+
+
+def test_multiple_brief_files_emit_separate_reports(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+
+    root = _multi_brief_governance_root(tmp_path)
+    model = build_console_model(root, as_of_date="2026-05-01")
+    tickers = {r["ticker"] for r in model["reports"]}
+    assert "ZETA" in tickers
+    assert "AAPL" in tickers
+    assert len(model["reports"]) == 2
+
+
+def test_multiple_brief_files_tickers_filter(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+
+    root = _multi_brief_governance_root(tmp_path)
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    tickers = {r["ticker"] for r in model["reports"]}
+    assert tickers == {"ZETA"}
+
+
+# ---------------------------------------------------------------------------
+# P51 review fix 2: html_status based on file existence
+# ---------------------------------------------------------------------------
+
+def test_html_status_missing_when_file_absent(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    # The fixture creates ZETA_BOSS_BRIEF.pdf but NOT ZETA_BOSS_BRIEF.html
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    report = model["reports"][0]
+    assert report["html_status"] == "missing"
+    html = render_console_html(model)
+    assert "HTML missing" in html
+
+
+def test_html_status_ready_when_file_exists(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+
+    root = _sample_governance_root(tmp_path)
+    day = root / "zeta-preview" / "2026-05-01"
+    (day / "ZETA_BOSS_BRIEF.html").write_text("<html></html>", encoding="utf-8")
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    report = model["reports"][0]
+    assert report["html_status"] == "ready"
+
+
+# ---------------------------------------------------------------------------
+# P51 review fix 3: boss-facing status label reduction
+# ---------------------------------------------------------------------------
+
+_RAW_CODES_SHOULD_NOT_APPEAR = [
+    "provider_ready",
+    "boss_preview_ready",
+    "monitor_red",
+    "boss_pdf_brief_ready",
+    "preview-only / incomplete",
+]
+
+
+def test_rendered_html_reduces_raw_status_codes(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    html = render_console_html(model)
+    for code in _RAW_CODES_SHOULD_NOT_APPEAR:
+        assert code not in html, f"raw code {code!r} should be reduced before rendering"
+
+
+_MATRIX_RAW_CODES = [
+    "provider_ready",
+    "preview-only / incomplete",
+    "missing",
+    "unknown",
+]
+
+
+def test_evidence_matrix_reduces_raw_status_codes(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    html = render_console_html(model)
+    matrix = html.split('Evidence Matrix')[1].split('</table>')[0]
+    for code in _MATRIX_RAW_CODES:
+        assert code not in matrix, f"raw code {code!r} found in Evidence Matrix"
+
+
+def test_console_uses_p52_visual_assets_when_present(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    day = root / "zeta-preview" / "2026-05-01"
+    assets = day / "p52_assets"
+    assets.mkdir()
+    kline = assets / "ZETA_kline.svg"
+    heatmap = assets / "watchlist_heatmap.svg"
+    kline.write_text("<svg><text>ZETA K-line</text></svg>", encoding="utf-8")
+    heatmap.write_text("<svg><text>Watchlist Heatmap</text></svg>", encoding="utf-8")
+    _write_json(day / "p52_market_visual_snapshot.json", {
+        "schema_version": "p52_market_visual_assets.1",
+        "status": "visual_assets_ready",
+        "as_of_date": "2026-05-01",
+        "tickers": ["ZETA"],
+        "ticker_visuals": [{
+            "ticker": "ZETA",
+            "data_status": "visual_ready",
+            "asset_paths": {"kline_svg": str(kline)},
+        }],
+        "heatmap": {"asset_path": str(heatmap), "metric": "return_20d"},
+        "warnings": [],
+    })
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    assert model["reports"][0]["visual_assets"]["kline_svg"] == str(kline)
+    html = render_console_html(model)
+    assert "ZETA K-line" in html
+    assert "Watchlist Heatmap" in html
+    assert "P52 Futu chart slot" not in html
