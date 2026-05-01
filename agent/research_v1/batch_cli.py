@@ -955,6 +955,7 @@ def _cmd_market_visual_run(
     if not output_path.is_absolute():
         output_path = paths.app_root / output_path
     ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    db = _ensure_database(paths)
     result = run_market_visual_assets(
         tickers=ticker_list,
         as_of_date=as_of_date,
@@ -964,6 +965,7 @@ def _cmd_market_visual_run(
         live=live,
         host=host,
         port=port,
+        db=db,
     )
     if result.get("status") == "blocked_invalid_input":
         print(f"invalid market-visual-run input: {result.get('warnings', ['unknown'])[0]}")

@@ -128,6 +128,27 @@ def _compute_source_hash(payload: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
+def _normalize_snapshot_rows(raw_rows: list[dict]) -> list[dict]:
+    normalized: list[dict] = []
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = row.get("symbol") or row.get("code") or ""
+        if not symbol:
+            continue
+        normalized.append({
+            "symbol": str(symbol),
+            "last_price": float(row.get("last_price") or row.get("price") or 0),
+            "open": float(row.get("open") or 0),
+            "high": float(row.get("high") or 0),
+            "low": float(row.get("low") or 0),
+            "close": float(row.get("close") or row.get("last_price") or 0),
+            "volume": int(row.get("volume") or 0),
+            "turnover": float(row.get("turnover") or 0),
+        })
+    return sorted(normalized, key=lambda r: r["symbol"])
+
+
 def build_market_visual_report(
     *,
     tickers: list[str],
@@ -174,6 +195,14 @@ def build_market_visual_report(
             "asset_paths": {},
         })
 
+    snapshot_rows: list[dict] = []
+    if provider is not None:
+        try:
+            raw_snapshots = provider.fetch_snapshot(normalized_tickers)
+            snapshot_rows = _normalize_snapshot_rows(raw_snapshots)
+        except Exception as exc:
+            all_warnings.append(f"snapshot_error:{exc}")
+
     ready_count = sum(1 for v in ticker_visuals if v["data_status"] == "visual_ready")
     if ready_count == len(normalized_tickers):
         status = P52_STATUS_READY
@@ -193,6 +222,7 @@ def build_market_visual_report(
         "provider_data_source": provider.data_source if provider else "offline",
         "price_adjustment": provider.price_adjustment if provider else "none",
         "history": {v["ticker"]: v["history"] for v in ticker_visuals},
+        "snapshot_rows": snapshot_rows,
     }
     source_hash = _compute_source_hash(hash_payload)
 
@@ -205,6 +235,7 @@ def build_market_visual_report(
         "heatmap_metric": heatmap_metric,
         "provider_status": provider_status,
         "ticker_visuals": ticker_visuals,
+        "snapshot_rows": snapshot_rows,
         "heatmap": {},
         "warnings": all_warnings,
         "source_hash": source_hash,
@@ -353,21 +384,43 @@ def write_market_visual_artifacts(report: dict, output_dir: Path) -> dict[str, s
     assets_dir.mkdir(parents=True, exist_ok=True)
 
     artifact_paths: dict[str, str] = {}
+    asset_content_hashes: dict[str, str] = {}
 
     for visual in report.get("ticker_visuals", []):
         ticker = visual.get("ticker", "")
         if visual.get("data_status") != "visual_missing_data" and visual.get("history"):
+            kline_svg = render_kline_svg(visual)
             kline_path = assets_dir / f"{ticker}_kline.svg"
-            kline_path.write_text(render_kline_svg(visual), encoding="utf-8")
+            kline_path.write_text(kline_svg, encoding="utf-8")
             visual["asset_paths"]["kline_svg"] = str(kline_path)
             artifact_paths[f"{ticker}_kline_svg"] = str(kline_path)
+            asset_content_hashes[f"{ticker}_kline.svg"] = hashlib.sha256(kline_svg.encode("utf-8")).hexdigest()[:16]
 
     ready_visuals = [v for v in report.get("ticker_visuals", []) if v.get("data_status") != "visual_missing_data" and v.get("history")]
     if ready_visuals:
+        heatmap_svg = render_heatmap_svg(ready_visuals, report.get("heatmap_metric", "return_20d"))
         heatmap_path = assets_dir / "watchlist_heatmap.svg"
-        heatmap_path.write_text(render_heatmap_svg(ready_visuals, report.get("heatmap_metric", "return_20d")), encoding="utf-8")
+        heatmap_path.write_text(heatmap_svg, encoding="utf-8")
         report["heatmap"] = {"asset_path": str(heatmap_path), "tile_count": len(ready_visuals), "metric": report.get("heatmap_metric", "return_20d")}
         artifact_paths["watchlist_heatmap_svg"] = str(heatmap_path)
+        asset_content_hashes["watchlist_heatmap.svg"] = hashlib.sha256(heatmap_svg.encode("utf-8")).hexdigest()[:16]
+
+    report["asset_content_hashes"] = dict(sorted(asset_content_hashes.items()))
+
+    # Finalize source_hash: include snapshot rows and rendered asset content hashes
+    final_hash_payload = {
+        "schema_version": P52_SCHEMA_VERSION,
+        "as_of_date": report["as_of_date"],
+        "tickers": report["tickers"],
+        "history_days": report["history_days"],
+        "heatmap_metric": report["heatmap_metric"],
+        "provider_data_source": report.get("provider_status", ""),
+        "history": {v["ticker"]: v["history"] for v in report.get("ticker_visuals", [])},
+        "snapshot_rows": report.get("snapshot_rows", []),
+        "asset_filenames": sorted(report.get("asset_content_hashes", {}).keys()),
+        "asset_content_hashes": report.get("asset_content_hashes", {}),
+    }
+    report["source_hash"] = _compute_source_hash(final_hash_payload)
 
     json_path = output_dir / "p52_market_visual_snapshot.json"
     json_path.write_text(json.dumps(report, indent=2, sort_keys=True, default=str), encoding="utf-8")
@@ -435,6 +488,7 @@ def run_market_visual_assets(
     heatmap_metric: str = "return_20d",
     host: str = "127.0.0.1",
     port: int = 11111,
+    db: Any = None,
 ) -> dict:
     warnings = validate_market_visual_inputs(
         tickers=tickers,
@@ -475,4 +529,8 @@ def run_market_visual_assets(
     artifact_paths = write_market_visual_artifacts(report, output_dir)
     report["output_dir"] = str(output_dir)
     report["artifact_paths"] = list(artifact_paths.values())
+
+    if db is not None:
+        db.save_market_visual_asset_report(report)
+
     return report

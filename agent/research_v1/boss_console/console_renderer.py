@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -80,8 +81,20 @@ def _inline_svg(path_value: str, fallback: str) -> str:
     if not path.exists() or path.suffix.lower() != ".svg":
         return fallback
     text = path.read_text(encoding="utf-8")
-    if "<script" in text.lower():
+    lower = text.lower()
+    if "<script" in lower:
         return fallback
+    if "onload=" in lower or "onclick=" in lower or "onerror=" in lower:
+        return fallback
+    if re.search(r'\bon\w+\s*=', lower):
+        return fallback
+    if "<foreignobject" in lower:
+        return fallback
+    if "http://" in lower or "https://" in lower:
+        return fallback
+    for term in FORBIDDEN_CONSOLE_TERMS:
+        if term in lower:
+            return fallback
     return f'<div class="visual-asset">{text}</div>'
 
 

@@ -269,3 +269,101 @@ def test_console_uses_p52_visual_assets_when_present(tmp_path: Path):
     assert "ZETA K-line" in html
     assert "Watchlist Heatmap" in html
     assert "P52 Futu chart slot" not in html
+
+
+def test_malicious_svg_falls_back_to_placeholder(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    day = root / "zeta-preview" / "2026-05-01"
+    assets = day / "p52_assets"
+    assets.mkdir()
+    kline = assets / "ZETA_kline.svg"
+    heatmap = assets / "watchlist_heatmap.svg"
+
+    # Malicious SVG with onload event handler
+    kline.write_text('<svg onload="alert(1)"><text>ZETA</text></svg>', encoding="utf-8")
+    heatmap.write_text("<svg><text>Heatmap</text></svg>", encoding="utf-8")
+    _write_json(day / "p52_market_visual_snapshot.json", {
+        "schema_version": "p52_market_visual_assets.1",
+        "status": "visual_assets_ready",
+        "as_of_date": "2026-05-01",
+        "tickers": ["ZETA"],
+        "ticker_visuals": [{
+            "ticker": "ZETA",
+            "data_status": "visual_ready",
+            "asset_paths": {"kline_svg": str(kline)},
+        }],
+        "heatmap": {"asset_path": str(heatmap), "metric": "return_20d"},
+        "warnings": [],
+    })
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    html = render_console_html(model)
+    # Malicious kline should fall back to placeholder
+    assert "P52 Futu chart slot" in html
+    assert 'alert(1)' not in html
+
+
+def test_svg_with_foreignobject_falls_back(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    day = root / "zeta-preview" / "2026-05-01"
+    assets = day / "p52_assets"
+    assets.mkdir()
+    kline = assets / "ZETA_kline.svg"
+    heatmap = assets / "watchlist_heatmap.svg"
+
+    kline.write_text('<svg><foreignObject><body>bad</body></foreignObject></svg>', encoding="utf-8")
+    heatmap.write_text("<svg><text>Heatmap</text></svg>", encoding="utf-8")
+    _write_json(day / "p52_market_visual_snapshot.json", {
+        "schema_version": "p52_market_visual_assets.1",
+        "status": "visual_assets_ready",
+        "as_of_date": "2026-05-01",
+        "tickers": ["ZETA"],
+        "ticker_visuals": [{
+            "ticker": "ZETA",
+            "data_status": "visual_ready",
+            "asset_paths": {"kline_svg": str(kline)},
+        }],
+        "heatmap": {"asset_path": str(heatmap), "metric": "return_20d"},
+        "warnings": [],
+    })
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    html = render_console_html(model)
+    assert "P52 Futu chart slot" in html
+    assert "foreignObject" not in html
+
+
+def test_svg_with_external_href_falls_back(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    day = root / "zeta-preview" / "2026-05-01"
+    assets = day / "p52_assets"
+    assets.mkdir()
+    kline = assets / "ZETA_kline.svg"
+    heatmap = assets / "watchlist_heatmap.svg"
+
+    kline.write_text('<svg><a href="https://evil.com">link</a></svg>', encoding="utf-8")
+    heatmap.write_text("<svg><text>Heatmap</text></svg>", encoding="utf-8")
+    _write_json(day / "p52_market_visual_snapshot.json", {
+        "schema_version": "p52_market_visual_assets.1",
+        "status": "visual_assets_ready",
+        "as_of_date": "2026-05-01",
+        "tickers": ["ZETA"],
+        "ticker_visuals": [{
+            "ticker": "ZETA",
+            "data_status": "visual_ready",
+            "asset_paths": {"kline_svg": str(kline)},
+        }],
+        "heatmap": {"asset_path": str(heatmap), "metric": "return_20d"},
+        "warnings": [],
+    })
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    html = render_console_html(model)
+    assert "P52 Futu chart slot" in html
+    assert "evil.com" not in html

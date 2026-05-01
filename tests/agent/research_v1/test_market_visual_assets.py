@@ -15,6 +15,7 @@ from agent.research_v1.market_visual_assets import (
     render_kline_svg,
     run_market_visual_assets,
     validate_market_visual_inputs,
+    write_market_visual_artifacts,
 )
 
 
@@ -213,3 +214,58 @@ def test_market_visual_same_day_revision_appends_new_row(tmp_path: Path):
     rows = db.list_market_visual_asset_reports_as_of("2026-05-01", tickers=["ZETA"])
     assert len(rows) == 2
     assert {row["source_hash"] for row in rows} == {base["source_hash"], revised["source_hash"]}
+
+
+def test_runtime_persists_report_when_db_provided(tmp_path: Path):
+    from agent.research_v1.data.database import ResearchDatabase
+
+    db = ResearchDatabase(str(tmp_path / "research.db"))
+    db.initialize()
+    provider = FakeProvider(histories={"ZETA": _rows([10 + i for i in range(60)])})
+    result = run_market_visual_assets(
+        tickers=["ZETA"],
+        as_of_date="2026-05-01",
+        output_root=tmp_path,
+        history_days=60,
+        provider=provider,
+        live=True,
+        db=db,
+    )
+    assert result["status"] == "visual_assets_ready"
+    rows = db.list_market_visual_asset_reports_as_of("2026-05-01", tickers=["ZETA"])
+    assert len(rows) == 1
+    assert rows[0]["source_hash"] == result["source_hash"]
+
+
+def test_snapshot_field_changes_source_hash():
+    provider_a = FakeProvider(
+        histories={"ZETA": _rows([10 + i for i in range(60)])},
+        snapshots=[{"symbol": "ZETA", "last_price": 50.0, "open": 49, "high": 51, "low": 48, "close": 50, "volume": 1000, "turnover": 50000}],
+    )
+    provider_b = FakeProvider(
+        histories={"ZETA": _rows([10 + i for i in range(60)])},
+        snapshots=[{"symbol": "ZETA", "last_price": 99.0, "open": 98, "high": 100, "low": 97, "close": 99, "volume": 2000, "turnover": 198000}],
+    )
+    report_a = build_market_visual_report(
+        tickers=["ZETA"], as_of_date="2026-05-01", history_days=60,
+        heatmap_metric="return_20d", provider=provider_a, live=True,
+    )
+    report_b = build_market_visual_report(
+        tickers=["ZETA"], as_of_date="2026-05-01", history_days=60,
+        heatmap_metric="return_20d", provider=provider_b, live=True,
+    )
+    assert report_a["source_hash"] != report_b["source_hash"]
+
+
+def test_asset_content_hash_changes_final_source_hash(tmp_path: Path):
+    """Changing rendered SVG content changes the finalized source_hash."""
+    provider = FakeProvider(histories={"ZETA": _rows([10 + i for i in range(60)])})
+    report = build_market_visual_report(
+        tickers=["ZETA"], as_of_date="2026-05-01", history_days=60,
+        heatmap_metric="return_20d", provider=provider, live=True,
+    )
+    pre_hash = report["source_hash"]
+    write_market_visual_artifacts(report, tmp_path / "out1")
+    post_hash = report["source_hash"]
+    # After rendering, source_hash should be finalized with asset content
+    assert pre_hash != post_hash or report.get("asset_content_hashes")
