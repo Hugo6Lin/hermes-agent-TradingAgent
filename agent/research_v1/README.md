@@ -140,6 +140,13 @@ context rather than hidden.
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 
+#### P50 Boss PDF Brief Renderer
+
+`boss_pdf_brief_renderer.py` is a presentation-only layer over P49 artifacts.
+It reads existing JSON files, reduces them into boss-facing categories, renders
+deterministic HTML, and optionally exports PDF. It does not invoke P37-P49
+runtimes or change research decisions.
+
 - how fundamentals quality should be scored
 - how to distinguish insufficient coverage from true `No Trade`
 - how to route analyst roles to stronger or lighter models appropriately

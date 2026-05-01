@@ -703,6 +703,28 @@ output/governance/YYYY-MM-DD/boss_preview.json
 
 The preview is not a trade instruction and does not call `HermesResearchApp.run()`, `final_judge`, broker/order APIs, model training, scheduling, or notifications.
 
+### P50 Boss PDF Brief Renderer
+
+P50 converts an existing P49 preview directory into the accepted boss artifact:
+a concise visual PDF brief plus deterministic HTML and JSON manifest.
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli boss-pdf-brief-run \
+  --preview-dir output/governance/zeta-boss-preview/2026-05-01 \
+  --ticker ZETA
+```
+
+Outputs:
+
+```text
+ZETA_BOSS_BRIEF.html
+ZETA_BOSS_BRIEF.pdf
+ZETA_BOSS_BRIEF.json
+```
+
+P50 is presentation-only. It does not call Futu, run research, call `final_judge`,
+create signals, or place/submit orders.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
