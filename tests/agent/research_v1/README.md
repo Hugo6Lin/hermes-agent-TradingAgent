@@ -19,6 +19,8 @@ all unit, integration, and acceptance tests for the Hermes research engine.
 | `test_p3_signal_quality.py` | Phase 3 signal quality and provider fallback |
 | `test_task_router.py` | Task router natural language parsing |
 | `test_report_pdf.py` | PDF export (legacy) |
+| `test_boss_console.py` | P51 boss web console + P55 V2.1 cockpit anchors and forbidden-status/phrase guards |
+| `test_boss_pdf_brief_renderer.py` | P50 boss PDF brief + P55 10-second read strip and never-collapsed evidence gaps |
 | `fixtures/` | JSON fixtures for batch payloads |
 
 ## Test Fixtures

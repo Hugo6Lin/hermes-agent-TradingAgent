@@ -248,8 +248,14 @@ def test_console_uses_p52_visual_assets_when_present(tmp_path: Path):
     assets.mkdir()
     kline = assets / "ZETA_kline.svg"
     heatmap = assets / "watchlist_heatmap.svg"
-    kline.write_text("<svg><text>ZETA K-line</text></svg>", encoding="utf-8")
-    heatmap.write_text("<svg><text>Watchlist Heatmap</text></svg>", encoding="utf-8")
+    kline.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg"><text>ZETA K-line</text></svg>',
+        encoding="utf-8",
+    )
+    heatmap.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg"><text>Watchlist Heatmap</text></svg>',
+        encoding="utf-8",
+    )
     _write_json(day / "p52_market_visual_snapshot.json", {
         "schema_version": "p52_market_visual_assets.1",
         "status": "visual_assets_ready",
@@ -335,6 +341,133 @@ def test_svg_with_foreignobject_falls_back(tmp_path: Path):
     html = render_console_html(model)
     assert "P52 Futu chart slot" in html
     assert "foreignObject" not in html
+
+
+# ---------------------------------------------------------------------------
+# P55 regressions — V2.1 cockpit visual integration.
+# ---------------------------------------------------------------------------
+
+P55_V21_VISUAL_ANCHORS = [
+    "cockpit-chrome",            # glass top chrome
+    "brandmark",                 # Hermes wordmark block
+    "Hermes",                    # wordmark text
+    "Boss Console",              # nav label
+    "command-region",            # command bar wrapper
+    "Open workspace",            # allowed action label
+    "Request brief",             # allowed action label
+    "market-strip",              # market regime strip
+    "Watchlist heatmap",         # heatmap card
+    "Report Center",             # report center card
+    "report-table",              # terminal-like report table
+    "Ticker Workspace",          # workspace card
+    "Evidence Matrix",           # workspace evidence matrix
+    "Today's review queue",      # side rail review queue
+    "Evidence health",           # side rail evidence health
+]
+
+
+def test_console_renders_v21_visual_anchors(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    html = render_console_html(model)
+    for anchor in P55_V21_VISUAL_ANCHORS:
+        assert anchor in html, f"missing v2.1 visual anchor: {anchor}"
+
+
+P55_FORBIDDEN_RAW_STATUSES = [
+    "provider_ready",
+    "monitor_red",
+    "monitor_yellow",
+    "visual_assets_missing_data",
+    "blocked_missing_context",
+    "prompt_pack_limited",
+    "boss_preview_ready",
+    "boss_pdf_brief_ready",
+    "preview-only / incomplete",
+    "preview-only / Incomplete",
+]
+
+
+def test_console_does_not_leak_raw_provider_or_monitor_statuses(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    # Force-inject boss-unfriendly statuses into the model to verify the
+    # renderer reduces them before emitting HTML.
+    for report in model["reports"]:
+        report["live_data_status"] = "provider_ready"
+        report["evidence_base_status"] = "preview-only / Incomplete"
+        report["guardrail_status"] = "monitor_red"
+        report["preview_status"] = "boss_preview_ready"
+        report["brief_status"] = "boss_pdf_brief_ready"
+    model["evidence_health"]["overall_status"] = "monitor_red"
+    html = render_console_html(model)
+    for code in P55_FORBIDDEN_RAW_STATUSES:
+        assert code not in html, f"raw status leaked into boss UI: {code!r}"
+
+
+P55_FORBIDDEN_TRADING_PHRASES = [
+    "buy now",
+    "sell now",
+    "place order",
+    "submit order",
+    "unlock trade",
+    "trade unlock",
+    "copy trade",
+    "auto trade",
+    "follow this trade",
+    "guaranteed edge",
+    "production approved",
+    "model promoted",
+]
+
+
+def test_console_does_not_leak_trading_instruction_language(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    html = render_console_html(model)
+    lowered = html.lower()
+    for phrase in P55_FORBIDDEN_TRADING_PHRASES:
+        assert phrase not in lowered, f"forbidden trading phrase leaked: {phrase!r}"
+
+
+def test_console_renderer_blocks_forbidden_trading_phrase_in_verdict(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    # Inject a bad verdict — renderer must refuse to emit it.
+    model["reports"][0]["verdict"] = "Buy now is the right move here."
+    import pytest
+    with pytest.raises(ValueError, match="forbidden_console_phrase:buy now"):
+        render_console_html(model)
+
+
+def test_console_status_badges_use_titlecased_v21_labels(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    html = render_console_html(model)
+    # At least one of the boss-readable labels must appear in the matrix
+    matrix = html.split("Evidence Matrix")[1].split("</table>")[0]
+    allowed_labels = ["Ready", "Limited", "Stale", "Sample", "Blocked", "Missing"]
+    assert any(label in matrix for label in allowed_labels), (
+        f"Evidence Matrix is missing a V2.1 boss-readable label: matrix={matrix!r}"
+    )
+    # Lowercase variants must NOT appear inside the matrix
+    for lowered in (label.lower() for label in allowed_labels):
+        assert lowered not in matrix, f"matrix leaks lowercase status: {lowered!r}"
 
 
 def test_svg_with_external_href_falls_back(tmp_path: Path):
