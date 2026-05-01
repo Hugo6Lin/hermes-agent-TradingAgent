@@ -741,6 +741,25 @@ health, ticker workspace, and placeholders for P52 Futu chart/heatmap.
 P51 does not call Futu directly, run research, call `final_judge`, create
 signals, or expose broker/order controls.
 
+### P52 Futu Visualization Assets
+
+P52 renders read-only market visualization assets for the Boss Console:
+K-line SVGs per ticker plus a watchlist heatmap SVG. It uses quote-only Futu
+OpenD calls through `FutuQuoteClient` when live mode is enabled, writes
+`p52_market_visual_snapshot.json` and SVG assets under `output/governance/YYYY-MM-DD/`,
+and lets P51 display those assets when present.
+
+P52 is not TradingView and is not a trading integration. It does not submit
+orders, unlock trading, query positions, run research, call `final_judge`, or
+mutate recommendations.
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli market-visual-run \
+  --tickers ZETA,NVDA,AMZN \
+  --as-of-date 2026-05-01 \
+  --output-root output/governance
+```
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:

@@ -22,3 +22,9 @@ P49/P50 governance artifacts.
 P51 is presentation-only. It does not call Futu, run research, invoke
 `final_judge`, or expose broker/order controls. Chart and heatmap slots
 are placeholders for P52.
+
+When P52 artifacts exist at `p52_market_visual_snapshot.json` and
+`p52_assets/`, P51 reads them and inlines K-line SVGs and the watchlist
+heatmap instead of the placeholders. P51 does not call the P52 runtime;
+it only reads existing artifacts. OpenD must be running and logged in
+for live P52 visualization.

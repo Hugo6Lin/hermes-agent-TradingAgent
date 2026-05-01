@@ -153,6 +153,14 @@ runtimes or change research decisions.
 presentation and navigation layer only. P51 leaves chart and heatmap slots for
 P52 Futu visualization work.
 
+#### P52 Futu Visualization Assets
+
+`market_visual_assets.py` renders read-only K-line SVGs and a watchlist heatmap
+from Futu quote data. It uses quote-only `FutuQuoteClient` calls when live mode
+is enabled, writes `p52_market_visual_snapshot.json` and SVG assets, and lets P51
+display those assets when present. OpenD must be running and logged in for live
+visualization. P52 does not trade, call `final_judge`, or mutate recommendations.
+
 - how fundamentals quality should be scored
 - how to distinguish insufficient coverage from true `No Trade`
 - how to route analyst roles to stronger or lighter models appropriately
