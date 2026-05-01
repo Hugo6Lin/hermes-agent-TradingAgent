@@ -246,10 +246,11 @@ def build_preview_decision_input(ticker: str, as_of_date: str) -> dict[str, Any]
         "as_of_date": as_of_date,
         "decisions": [{
             "ticker": ticker,
-            "contemplated_action": "Watchlist",
-            "decision_intent": "research_review",
+            "contemplated_action": "research_candidate",
+            "decision_intent": "review_before_action",
             "stated_reason": "Boss preview sample decision for guardrail demonstration.",
-            "confidence": 0.55,
+            "boss_confidence": 0.55,
+            "urgency": "low",
             "position_context": {"portfolio_weight_pct": 0.0, "sector_weight_pct": 0.0},
         }],
     }

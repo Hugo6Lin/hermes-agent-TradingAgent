@@ -64,6 +64,7 @@ def test_markdown_boss_summary_comes_before_technical_appendix():
 from agent.research_v1.boss_preview_runner import (
     build_preview_fundamental_input,
     build_preview_candidate_input,
+    build_preview_decision_input,
     run_boss_preview,
 )
 from agent.research_v1.data.database import ResearchDatabase
@@ -253,3 +254,27 @@ def test_run_boss_preview_no_live_does_not_instantiate_futu(monkeypatch, tmp_pat
     # The safe provider for live=False should be the offline empty provider, not Futu
     safe = _build_safe_p37_provider(None, live=False)
     assert safe.data_source == "p49_offline"
+
+
+# --- P49: P41 sample input validity tests ---
+
+from agent.research_v1.decision_journal_guardrails import validate_decision_item
+
+
+def test_preview_decision_input_passes_p41_validation():
+    payload = build_preview_decision_input("NVDA", "2026-05-01")
+    assert payload["_preview_sample"] is True
+    item = payload["decisions"][0]
+    errors = validate_decision_item(item)
+    assert errors == [], f"P41 validation errors: {errors}"
+    assert "boss_confidence" in item
+    assert "urgency" in item
+    assert "confidence" not in item
+
+
+def test_preview_decision_input_has_valid_action_and_intent():
+    from agent.research_v1.decision_journal_guardrails import P41_ALLOWED_ACTIONS, P41_ALLOWED_INTENTS
+    payload = build_preview_decision_input("AMZN", "2026-05-01")
+    item = payload["decisions"][0]
+    assert item["contemplated_action"] in P41_ALLOWED_ACTIONS
+    assert item["decision_intent"] in P41_ALLOWED_INTENTS
