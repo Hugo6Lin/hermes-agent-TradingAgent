@@ -25,6 +25,7 @@ from agent.research_v1.research_context_prompt_pack import run_research_context_
 from agent.research_v1.boss_preview_runner import run_boss_preview
 from agent.research_v1.boss_pdf_brief_renderer import run_boss_pdf_brief
 from agent.research_v1.boss_console.console_runtime import run_boss_console
+from agent.research_v1.boss_one_command import run_boss_one_command
 from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.market_visual_assets import run_market_visual_assets
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
@@ -979,6 +980,54 @@ def _cmd_market_visual_run(
     return 0
 
 
+def _cmd_boss_one_command_run(
+    paths: HermesPaths,
+    tickers: str,
+    as_of_date: str,
+    output_root: str,
+    governance_root: str,
+    run_id: str | None,
+    live: bool,
+    render_pdf: bool,
+    history_days: int,
+    max_candidates: int,
+    host: str,
+    port: int,
+) -> int:
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+    result = run_boss_one_command(
+        db=_ensure_database(paths),
+        tickers=ticker_list,
+        as_of_date=as_of_date,
+        output_root=output_path.resolve(),
+        governance_root=governance_path.resolve(),
+        run_id=run_id,
+        live=live,
+        render_pdf=render_pdf,
+        history_days=history_days,
+        max_candidates=max_candidates,
+        host=host,
+        port=port,
+    )
+    if result.get("status") == "boss_one_command_blocked_invalid_input":
+        print(f"invalid boss-one-command-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Boss one-command status: {result['status']}")
+    print(f"Boss console: {result.get('console', {}).get('html_path', '')}")
+    for brief in result.get("briefs", []):
+        print(f"{brief.get('ticker', '')} PDF: {brief.get('pdf_path') or 'not generated'}")
+    print(f"Summary: {result.get('summary_json_path', '')}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -1198,6 +1247,21 @@ def build_parser() -> argparse.ArgumentParser:
     visual_parser.add_argument("--host", default="127.0.0.1")
     visual_parser.add_argument("--port", type=int, default=11111)
 
+    one_parser = subparsers.add_parser("boss-one-command-run", help="Run preview, visuals, PDF briefs, and console from tickers.")
+    one_parser.add_argument("--tickers", required=True)
+    one_parser.add_argument("--as-of-date", required=True)
+    one_parser.add_argument("--output-root", default="output/boss")
+    one_parser.add_argument("--governance-root", default="output/governance")
+    one_parser.add_argument("--run-id", default=None)
+    one_parser.add_argument("--history-days", type=int, default=120)
+    one_parser.add_argument("--max-candidates", type=int, default=8)
+    one_parser.add_argument("--live", dest="live", action="store_true", default=True)
+    one_parser.add_argument("--no-live", dest="live", action="store_false")
+    one_parser.add_argument("--no-pdf", dest="render_pdf", action="store_false")
+    one_parser.set_defaults(render_pdf=True)
+    one_parser.add_argument("--host", default="127.0.0.1")
+    one_parser.add_argument("--port", type=int, default=11111)
+
     return parser
 
 
@@ -1371,6 +1435,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             history_days=args.history_days,
             heatmap_metric=args.heatmap_metric,
             live=args.live,
+            host=args.host,
+            port=args.port,
+        )
+    if args.command == "boss-one-command-run":
+        return _cmd_boss_one_command_run(
+            paths,
+            tickers=args.tickers,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+            governance_root=args.governance_root,
+            run_id=args.run_id,
+            live=args.live,
+            render_pdf=args.render_pdf,
+            history_days=args.history_days,
+            max_candidates=args.max_candidates,
             host=args.host,
             port=args.port,
         )
