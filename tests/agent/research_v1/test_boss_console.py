@@ -72,3 +72,16 @@ def test_console_model_loads_reports_from_governance_root(tmp_path: Path):
     assert model["reports"][0]["ticker"] == "ZETA"
     assert model["reports"][0]["pdf_status"] == "ready"
     assert model["evidence_health"]["overall_status"] == "monitor_red"
+
+
+def test_console_renderer_outputs_required_sections_and_hides_forbidden_terms(tmp_path: Path):
+    from agent.research_v1.boss_console.console_model import build_console_model
+    from agent.research_v1.boss_console.console_renderer import FORBIDDEN_CONSOLE_TERMS, render_console_html
+
+    root = _sample_governance_root(tmp_path)
+    model = build_console_model(root, as_of_date="2026-05-01", tickers=["ZETA"])
+    html = render_console_html(model)
+    for text in ["Hermes Boss Console", "Run Boss Preview", "Report Center", "Ticker Workspace", "Evidence Matrix", "P52 Futu chart", "P52 watchlist heatmap"]:
+        assert text in html
+    for term in FORBIDDEN_CONSOLE_TERMS:
+        assert term not in html
