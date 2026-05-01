@@ -2005,7 +2005,7 @@ class ResearchDatabase:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM market_regime_snapshots WHERE as_of_date <= ? ORDER BY as_of_date DESC, created_at DESC LIMIT ?",
+            "SELECT * FROM market_regime_snapshots WHERE as_of_date <= ? ORDER BY as_of_date DESC, created_at DESC, snapshot_id ASC LIMIT ?",
             (as_of_date, limit),
         )
         rows = cursor.fetchall()
@@ -2132,7 +2132,7 @@ class ResearchDatabase:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM fundamental_quality_reports WHERE ticker = ? AND as_of_date <= ? ORDER BY as_of_date DESC, created_at DESC LIMIT ?",
+            "SELECT * FROM fundamental_quality_reports WHERE ticker = ? AND as_of_date <= ? ORDER BY as_of_date DESC, created_at DESC, report_id ASC LIMIT ?",
             (ticker, as_of_date, limit),
         )
         rows = cursor.fetchall()
@@ -2622,3 +2622,967 @@ class ResearchDatabase:
             except (json.JSONDecodeError, TypeError):
                 d[key] = [] if "themes" in col or "risk" in col or "missing" in col else {}
         return d
+
+    def get_latest_candidate_pool_run_as_of(self, as_of_date: str) -> dict | None:
+        self.initialize_candidate_pool_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM candidate_pool_runs
+               WHERE as_of_date <= ?
+               ORDER BY as_of_date DESC, created_at DESC, run_id ASC
+               LIMIT 1""",
+            (as_of_date,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_latest_decision_journal_entry(self, ticker: str, as_of_date: str) -> dict | None:
+        self.initialize_decision_journal_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM decision_journal_entries
+               WHERE ticker = ? AND as_of_date <= ?
+               ORDER BY as_of_date DESC, created_at DESC, journal_id ASC
+               LIMIT 1""",
+            (ticker, as_of_date),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def initialize_boss_copilot_brief_schema(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS boss_copilot_daily_briefs (
+                brief_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                priority_count INTEGER NOT NULL,
+                manual_review_count INTEGER NOT NULL,
+                source_hash TEXT NOT NULL,
+                brief_json TEXT NOT NULL,
+                UNIQUE(as_of_date, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_boss_copilot_daily_brief(self, brief: dict) -> str:
+        self.initialize_boss_copilot_brief_schema()
+        summary = brief.get("summary", {})
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO boss_copilot_daily_briefs (
+                brief_id, schema_version, as_of_date, created_at,
+                status, priority_count, manual_review_count,
+                source_hash, brief_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                brief["brief_id"],
+                brief["schema_version"],
+                brief["as_of_date"],
+                brief.get("created_at", ""),
+                brief.get("status", ""),
+                summary.get("priority_count", 0),
+                summary.get("manual_review_count", 0),
+                brief["source_hash"],
+                json.dumps(brief),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return brief["brief_id"]
+
+    def list_boss_copilot_daily_briefs(self, as_of_date: str | None = None, limit: int = 20) -> list[dict]:
+        self.initialize_boss_copilot_brief_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if as_of_date:
+            cursor.execute(
+                """SELECT * FROM boss_copilot_daily_briefs
+                   WHERE as_of_date = ?
+                   ORDER BY created_at DESC, brief_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+        else:
+            cursor.execute(
+                """SELECT * FROM boss_copilot_daily_briefs
+                   ORDER BY as_of_date DESC, created_at DESC, brief_id ASC
+                   LIMIT ?""",
+                (limit,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def initialize_copilot_console_index_schema(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS copilot_console_indexes (
+                index_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                lookback_days INTEGER NOT NULL,
+                day_count INTEGER NOT NULL,
+                latest_day TEXT,
+                source_hash TEXT NOT NULL,
+                index_json TEXT NOT NULL,
+                UNIQUE(as_of_date, lookback_days, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_copilot_console_index(self, index: dict) -> str:
+        self.initialize_copilot_console_index_schema()
+        summary = index.get("summary", {})
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO copilot_console_indexes (
+                index_id, schema_version, as_of_date, created_at, status,
+                lookback_days, day_count, latest_day, source_hash, index_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                index["index_id"],
+                index["schema_version"],
+                index["as_of_date"],
+                index.get("created_at", ""),
+                index.get("status", ""),
+                index.get("lookback_days", 0),
+                summary.get("day_count", 0),
+                summary.get("latest_day", ""),
+                index["source_hash"],
+                json.dumps(index),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return index["index_id"]
+
+    def list_copilot_console_indexes(self, as_of_date: str | None = None, limit: int = 20) -> list[dict]:
+        self.initialize_copilot_console_index_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if as_of_date:
+            cursor.execute(
+                """SELECT * FROM copilot_console_indexes
+                   WHERE as_of_date = ?
+                   ORDER BY created_at DESC, index_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+        else:
+            cursor.execute(
+                """SELECT * FROM copilot_console_indexes
+                   ORDER BY as_of_date DESC, created_at DESC, index_id ASC
+                   LIMIT ?""",
+                (limit,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    # ── P44 Evidence Freshness & Drift Monitor ───────────────────────────
+
+    def initialize_evidence_freshness_drift_schema(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS evidence_freshness_drift_reports (
+                report_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                lookback_days INTEGER NOT NULL,
+                freshness_days INTEGER NOT NULL,
+                phase_count INTEGER NOT NULL,
+                red_count INTEGER NOT NULL,
+                yellow_count INTEGER NOT NULL,
+                source_hash TEXT NOT NULL,
+                report_json TEXT NOT NULL,
+                UNIQUE(as_of_date, lookback_days, freshness_days, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_evidence_freshness_drift_report(self, report: dict) -> str:
+        self.initialize_evidence_freshness_drift_schema()
+        summary = report.get("summary", {})
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO evidence_freshness_drift_reports (
+                report_id, schema_version, as_of_date, created_at, status,
+                lookback_days, freshness_days, phase_count, red_count, yellow_count,
+                source_hash, report_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                report["report_id"],
+                report["schema_version"],
+                report["as_of_date"],
+                report.get("created_at", ""),
+                report.get("status", ""),
+                report.get("lookback_days", 0),
+                report.get("freshness_days", 0),
+                summary.get("phase_count", 0),
+                summary.get("red_count", 0),
+                summary.get("yellow_count", 0),
+                report["source_hash"],
+                json.dumps(report),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return report["report_id"]
+
+    def list_evidence_freshness_drift_reports(self, as_of_date: str | None = None, limit: int = 20) -> list[dict]:
+        self.initialize_evidence_freshness_drift_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if as_of_date:
+            cursor.execute(
+                """SELECT * FROM evidence_freshness_drift_reports
+                   WHERE as_of_date = ?
+                   ORDER BY created_at DESC, report_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+        else:
+            cursor.execute(
+                """SELECT * FROM evidence_freshness_drift_reports
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC
+                   LIMIT ?""",
+                (limit,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def collect_evidence_phase_rows(self, as_of_date: str, lookback_days: int) -> dict[str, list[dict]]:
+        """Collect recent evidence rows for P44. Missing tables return empty phase lists."""
+        from datetime import date as _date, timedelta as _td
+
+        result: dict[str, list[dict]] = {p: [] for p in ("P36", "P37", "P38", "P39", "P40", "P41", "P42", "P43")}
+        cutoff = (_date.fromisoformat(as_of_date) - _td(days=lookback_days)).isoformat()
+
+        queries = {
+            "P36": {
+                "table": "canonical_recommendation_outcomes",
+                "date_col": "evaluated_for_date",
+                "created_col": "evaluated_at",
+                "hash_col": "data_source_hash",
+                "status_col": "status",
+                "json_cols": [],
+            },
+            "P37": {
+                "table": "market_regime_snapshots",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "data_source_hash",
+                "status_col": "regime_label",
+                "json_cols": ["summary_json"],
+            },
+            "P38": {
+                "table": "fundamental_quality_reports",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "quality_label",
+                "json_cols": ["missing_required_fields_json", "warnings_json"],
+            },
+            "P39": {
+                "table": "candidate_pool_runs",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "status",
+                "json_cols": [],
+            },
+            "P40": {
+                "table": "research_memory_packs",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "memory_status",
+                "json_cols": ["missing_context_json"],
+            },
+            "P41": {
+                "table": "decision_journal_entries",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "severity",
+                "json_cols": ["entry_json"],
+            },
+            "P42": {
+                "table": "boss_copilot_daily_briefs",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "status",
+                "json_cols": ["brief_json"],
+            },
+            "P43": {
+                "table": "copilot_console_indexes",
+                "date_col": "as_of_date",
+                "created_col": "created_at",
+                "hash_col": "source_hash",
+                "status_col": "status",
+                "json_cols": ["index_json"],
+            },
+        }
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        for phase, cfg in queries.items():
+            try:
+                json_select = ", ".join(cfg["json_cols"]) if cfg["json_cols"] else "'{}' AS _empty"
+                cursor.execute(
+                    f"""SELECT {cfg['date_col']}, {cfg['created_col']}, {cfg['hash_col']}, {cfg['status_col']},
+                               {json_select}
+                        FROM {cfg['table']}
+                        WHERE {cfg['date_col']} >= ? AND {cfg['date_col']} <= ?
+                        ORDER BY {cfg['date_col']} DESC, {cfg['created_col']} DESC
+                        LIMIT 100""",
+                    (cutoff, as_of_date),
+                )
+                rows = []
+                for row in cursor.fetchall():
+                    d = dict(row)
+                    payload: dict = {}
+                    for json_col in cfg["json_cols"]:
+                        raw = d.get(json_col)
+                        if raw:
+                            try:
+                                parsed = json.loads(raw)
+                                if isinstance(parsed, dict):
+                                    payload.update(parsed)
+                                else:
+                                    # Strip _json suffix so consumers see e.g.
+                                    # payload["missing_context"] instead of
+                                    # payload["missing_context_json"].
+                                    mapped_key = json_col[:-5] if json_col.endswith("_json") else json_col
+                                    payload[mapped_key] = parsed
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                    rows.append({
+                        "phase_id": phase,
+                        "as_of_date": d.get(cfg["date_col"], ""),
+                        "created_at": d.get(cfg["created_col"], ""),
+                        "source_hash": d.get(cfg["hash_col"], ""),
+                        "status": d.get(cfg["status_col"], ""),
+                        "payload": payload,
+                    })
+                result[phase] = rows
+            except Exception:
+                result[phase] = []
+        conn.close()
+        return result
+
+    def initialize_market_data_readiness_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS market_data_readiness_reports (
+                    report_id TEXT PRIMARY KEY,
+                    schema_version TEXT NOT NULL,
+                    as_of_date TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    host TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    symbols_json TEXT NOT NULL,
+                    history_days INTEGER NOT NULL,
+                    option_symbol TEXT NOT NULL,
+                    live INTEGER NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    report_json TEXT NOT NULL,
+                    UNIQUE(as_of_date, host, port, symbols_json, history_days, option_symbol, live, source_hash)
+                )"""
+            )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_market_data_readiness_as_of_date
+                   ON market_data_readiness_reports(as_of_date)"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_market_data_readiness_report(self, report: dict) -> str:
+        self.initialize_market_data_readiness_schema()
+        conn = self._get_connection()
+        try:
+            report_id = report["report_id"]
+            conn.execute(
+                """INSERT OR IGNORE INTO market_data_readiness_reports
+                   (report_id, schema_version, as_of_date, created_at, status,
+                    host, port, symbols_json, history_days, option_symbol, live,
+                    source_hash, report_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    report_id,
+                    report["schema_version"],
+                    report["as_of_date"],
+                    report["created_at"],
+                    report["status"],
+                    report["host"],
+                    report["port"],
+                    json.dumps(report["symbols"], sort_keys=True),
+                    report["history_days"],
+                    report["option_symbol"],
+                    int(report["live"]),
+                    report["source_hash"],
+                    json.dumps(report, sort_keys=True, default=str),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return report_id
+
+    def list_market_data_readiness_reports(
+        self, *, as_of_date: str | None = None, limit: int = 50
+    ) -> list[dict]:
+        self.initialize_market_data_readiness_schema()
+        conn = self._get_connection()
+        try:
+            if as_of_date:
+                cursor = conn.execute(
+                    """SELECT report_id, schema_version, as_of_date, created_at,
+                              status, host, port, symbols_json, history_days,
+                              option_symbol, live, source_hash, report_json
+                       FROM market_data_readiness_reports
+                       WHERE as_of_date = ?
+                       ORDER BY created_at DESC
+                       LIMIT ?""",
+                    (as_of_date, limit),
+                )
+            else:
+                cursor = conn.execute(
+                    """SELECT report_id, schema_version, as_of_date, created_at,
+                              status, host, port, symbols_json, history_days,
+                              option_symbol, live, source_hash, report_json
+                       FROM market_data_readiness_reports
+                       ORDER BY created_at DESC
+                       LIMIT ?""",
+                    (limit,),
+                )
+            rows = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                rows.append({
+                    "report_id": d["report_id"],
+                    "schema_version": d["schema_version"],
+                    "as_of_date": d["as_of_date"],
+                    "created_at": d["created_at"],
+                    "status": d["status"],
+                    "host": d["host"],
+                    "port": d["port"],
+                    "symbols": json.loads(d["symbols_json"]),
+                    "history_days": d["history_days"],
+                    "option_symbol": d["option_symbol"],
+                    "live": bool(d["live"]),
+                    "source_hash": d["source_hash"],
+                })
+            return rows
+        finally:
+            conn.close()
+
+    def latest_evidence_freshness_drift_report_as_of(self, as_of_date: str) -> dict | None:
+        self.initialize_evidence_freshness_drift_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT report_json FROM evidence_freshness_drift_reports
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC
+                   LIMIT 1""",
+                (as_of_date,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return json.loads(dict(row)["report_json"])
+        finally:
+            conn.close()
+
+    def latest_market_data_readiness_report_as_of(self, as_of_date: str) -> dict | None:
+        self.initialize_market_data_readiness_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT report_json FROM market_data_readiness_reports
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC
+                   LIMIT 1""",
+                (as_of_date,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return json.loads(dict(row)["report_json"])
+        finally:
+            conn.close()
+
+    def initialize_evidence_refresh_plan_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS evidence_refresh_plans (
+                    plan_id TEXT PRIMARY KEY,
+                    schema_version TEXT NOT NULL,
+                    as_of_date TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    lookback_days INTEGER NOT NULL,
+                    max_items INTEGER NOT NULL,
+                    candidate_count INTEGER NOT NULL,
+                    blocked_count INTEGER NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    plan_json TEXT NOT NULL,
+                    UNIQUE(as_of_date, lookback_days, max_items, source_hash)
+                )"""
+            )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_evidence_refresh_plans_as_of_date
+                   ON evidence_refresh_plans(as_of_date)"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_evidence_refresh_plan(self, plan: dict) -> str:
+        self.initialize_evidence_refresh_plan_schema()
+        summary = plan.get("summary", {})
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT OR IGNORE INTO evidence_refresh_plans (
+                    plan_id, schema_version, as_of_date, created_at, status,
+                    lookback_days, max_items, candidate_count, blocked_count,
+                    source_hash, plan_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    plan["plan_id"],
+                    plan["schema_version"],
+                    plan["as_of_date"],
+                    plan.get("created_at", ""),
+                    plan.get("status", ""),
+                    int(plan.get("lookback_days", 0)),
+                    int(plan.get("max_items", 0)),
+                    int(summary.get("candidate_count", 0)),
+                    int(summary.get("blocked_count", 0)),
+                    plan["source_hash"],
+                    json.dumps(plan, sort_keys=True, default=str),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return plan["plan_id"]
+
+    def list_evidence_refresh_plans(
+        self, *, as_of_date: str | None = None, limit: int = 20
+    ) -> list[dict]:
+        self.initialize_evidence_refresh_plan_schema()
+        conn = self._get_connection()
+        try:
+            if as_of_date:
+                cursor = conn.execute(
+                    """SELECT * FROM evidence_refresh_plans
+                       WHERE as_of_date = ?
+                       ORDER BY created_at DESC, plan_id ASC
+                       LIMIT ?""",
+                    (as_of_date, limit),
+                )
+            else:
+                cursor = conn.execute(
+                    """SELECT * FROM evidence_refresh_plans
+                       ORDER BY as_of_date DESC, created_at DESC, plan_id ASC
+                       LIMIT ?""",
+                    (limit,),
+                )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    # --- P47 Research Context Pack helpers ---
+
+    def initialize_research_context_pack_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS research_context_packs (
+                    pack_id TEXT PRIMARY KEY,
+                    as_of_date TEXT NOT NULL,
+                    tickers_key TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    source_refs_json TEXT NOT NULL,
+                    missing_context_json TEXT NOT NULL,
+                    warnings_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(as_of_date, tickers_key, source_hash)
+                )"""
+            )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_research_context_packs_as_of_date
+                   ON research_context_packs(as_of_date)"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_research_context_pack(self, pack: dict) -> str:
+        self.initialize_research_context_pack_schema()
+        tickers_key = "|".join(pack.get("tickers", []))
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT OR IGNORE INTO research_context_packs (
+                    pack_id, as_of_date, tickers_key, status, source_hash,
+                    source_refs_json, missing_context_json, warnings_json,
+                    payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    pack["pack_id"],
+                    pack["as_of_date"],
+                    tickers_key,
+                    pack["status"],
+                    pack["source_hash"],
+                    json.dumps(pack.get("source_refs", []), sort_keys=True),
+                    json.dumps(pack.get("missing_context", []), sort_keys=True),
+                    json.dumps(pack.get("warnings", []), sort_keys=True),
+                    json.dumps(pack, sort_keys=True, default=str),
+                    pack.get("created_at", ""),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return pack["pack_id"]
+
+    def list_research_context_packs(
+        self, *, as_of_date: str | None = None, limit: int = 20
+    ) -> list[dict]:
+        self.initialize_research_context_pack_schema()
+        conn = self._get_connection()
+        try:
+            if as_of_date:
+                cursor = conn.execute(
+                    """SELECT * FROM research_context_packs
+                       WHERE as_of_date = ?
+                       ORDER BY created_at DESC, pack_id ASC
+                       LIMIT ?""",
+                    (as_of_date, limit),
+                )
+            else:
+                cursor = conn.execute(
+                    """SELECT * FROM research_context_packs
+                       ORDER BY as_of_date DESC, created_at DESC, pack_id ASC
+                       LIMIT ?""",
+                    (limit,),
+                )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_evidence_freshness_drift_reports_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_evidence_freshness_drift_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM evidence_freshness_drift_reports
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if "report_json" in d:
+                    try:
+                        d.update(json.loads(d["report_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()
+
+    def list_market_data_readiness_reports_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_market_data_readiness_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM market_data_readiness_reports
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if "report_json" in d:
+                    try:
+                        d.update(json.loads(d["report_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()
+
+    def list_evidence_refresh_plans_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_evidence_refresh_plan_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM evidence_refresh_plans
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, plan_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if "plan_json" in d:
+                    try:
+                        d.update(json.loads(d["plan_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()
+
+    def list_canonical_outcomes_for_ticker(
+        self, ticker: str, as_of_date: str, lookback_days: int, limit: int = 3
+    ) -> list[dict]:
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM canonical_recommendation_outcomes
+                   WHERE ticker = ?
+                     AND evaluated_for_date <= ?
+                     AND evaluated_for_date >= date(?, ?)
+                   ORDER BY evaluated_for_date DESC, created_at DESC
+                   LIMIT ?""",
+                (ticker, as_of_date, as_of_date, f"-{lookback_days} days", limit),
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_research_memory_packs_as_of(self, ticker: str, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_memory_pack_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM research_memory_packs
+                   WHERE ticker = ? AND as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, pack_id ASC
+                   LIMIT ?""",
+                (ticker, as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_decision_journal_entries_as_of(self, ticker: str, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_decision_journal_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM decision_journal_entries
+                   WHERE ticker = ? AND as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, journal_id ASC
+                   LIMIT ?""",
+                (ticker, as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_boss_copilot_daily_briefs_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_boss_copilot_brief_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM boss_copilot_daily_briefs
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, brief_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if "brief_json" in d:
+                    try:
+                        d.update(json.loads(d["brief_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()
+
+    def list_copilot_console_indexes_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_copilot_console_index_schema()
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """SELECT * FROM copilot_console_indexes
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, index_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if "index_json" in d:
+                    try:
+                        d.update(json.loads(d["index_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()
+
+    # --- P48 Research Context Prompt Pack helpers ---
+
+    def initialize_research_context_prompt_pack_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS research_context_prompt_packs (
+                    prompt_pack_id TEXT PRIMARY KEY,
+                    as_of_date TEXT NOT NULL,
+                    tickers_key TEXT NOT NULL,
+                    roles_key TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    source_context_pack_id TEXT NOT NULL,
+                    source_context_hash TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    omitted_context_json TEXT NOT NULL,
+                    warnings_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(as_of_date, tickers_key, roles_key, source_hash)
+                )"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_research_context_prompt_pack(self, pack: dict) -> str:
+        self.initialize_research_context_prompt_pack_schema()
+        tickers_key = "|".join(pack.get("tickers", []))
+        roles_key = "|".join(pack.get("roles", []))
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT OR IGNORE INTO research_context_prompt_packs (
+                    prompt_pack_id, as_of_date, tickers_key, roles_key, status,
+                    source_context_pack_id, source_context_hash, source_hash,
+                    omitted_context_json, warnings_json, payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    pack["prompt_pack_id"],
+                    pack["as_of_date"],
+                    tickers_key,
+                    roles_key,
+                    pack["status"],
+                    pack.get("source_context_pack_id", ""),
+                    pack.get("source_context_hash", ""),
+                    pack["source_hash"],
+                    json.dumps(pack.get("omitted_context", []), sort_keys=True),
+                    json.dumps(pack.get("warnings", []), sort_keys=True),
+                    json.dumps(pack, sort_keys=True, default=str),
+                    pack.get("created_at", ""),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return pack["prompt_pack_id"]
+
+    def list_research_context_prompt_packs(
+        self, *, as_of_date: str | None = None, limit: int = 20
+    ) -> list[dict]:
+        self.initialize_research_context_prompt_pack_schema()
+        conn = self._get_connection()
+        try:
+            if as_of_date:
+                rows = conn.execute(
+                    """SELECT * FROM research_context_prompt_packs
+                       WHERE as_of_date = ?
+                       ORDER BY created_at DESC, prompt_pack_id ASC
+                       LIMIT ?""",
+                    (as_of_date, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM research_context_prompt_packs
+                       ORDER BY as_of_date DESC, created_at DESC, prompt_pack_id ASC
+                       LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_research_context_packs_as_of(self, as_of_date: str, limit: int = 5) -> list[dict]:
+        self.initialize_research_context_pack_schema()
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                """SELECT * FROM research_context_packs
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, pack_id ASC
+                   LIMIT ?""",
+                (as_of_date, limit),
+            ).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                try:
+                    payload = json.loads(d.get("payload_json", "{}"))
+                    payload.setdefault("pack_id", d.get("pack_id"))
+                    result.append(payload)
+                except (json.JSONDecodeError, TypeError):
+                    result.append(d)
+            return result
+        finally:
+            conn.close()

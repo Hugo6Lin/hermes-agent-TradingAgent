@@ -15,6 +15,13 @@ from agent.research_v1.fundamental_quality import run_fundamental_quality
 from agent.research_v1.candidate_pool import run_candidate_pool
 from agent.research_v1.research_memory_pack import run_research_memory_pack
 from agent.research_v1.decision_journal_guardrails import run_decision_journal_guardrails
+from agent.research_v1.boss_copilot_daily_brief import run_boss_copilot_daily_brief
+from agent.research_v1.copilot_console_index import run_copilot_console_index
+from agent.research_v1.evidence_freshness_drift_monitor import run_evidence_freshness_drift_monitor
+from agent.research_v1.evidence_refresh_planner import run_evidence_refresh_planner
+from agent.research_v1.market_data_readiness import run_market_data_readiness
+from agent.research_v1.research_context_pack import run_research_context_pack
+from agent.research_v1.research_context_prompt_pack import run_research_context_prompt_pack
 from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
@@ -468,6 +475,340 @@ def _cmd_decision_journal_run(
     return 0
 
 
+def _cmd_boss_copilot_brief_run(paths: HermesPaths, as_of_date: str, output_root: str, max_priorities: int) -> int:
+    from datetime import date as _date
+
+    try:
+        _date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid boss-copilot-brief-run input: invalid date format '{as_of_date}'")
+        return 2
+    if max_priorities <= 0:
+        print("invalid boss-copilot-brief-run input: max-priorities must be positive")
+        return 2
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_boss_copilot_daily_brief(
+        db=database,
+        as_of_date=as_of_date,
+        output_root=output_path.resolve(),
+        max_priorities=max_priorities,
+    )
+    if result.get("status") == "blocked_invalid_input":
+        print(f"invalid boss-copilot-brief-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+
+    print(f"Boss co-pilot brief status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Priority count: {result['priority_count']}")
+    print(f"High priority count: {result['high_priority_count']}")
+    print(f"Manual review count: {result['manual_review_count']}")
+    print(f"Missing context count: {result['missing_context_count']}")
+    return 0
+
+
+def _cmd_copilot_console_index_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    lookback_days: int,
+    governance_root: str,
+    output_root: str,
+) -> int:
+    from datetime import date as _date
+
+    try:
+        _date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid copilot-console-index-run input: invalid date format '{as_of_date}'")
+        return 2
+    if lookback_days <= 0:
+        print("invalid copilot-console-index-run input: lookback-days must be positive")
+        return 2
+
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_copilot_console_index(
+        governance_root=governance_path.resolve(),
+        output_root=output_path.resolve(),
+        as_of_date=as_of_date,
+        lookback_days=lookback_days,
+        db=database,
+    )
+    if result.get("status") == "blocked_invalid_input":
+        print(f"invalid copilot-console-index-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Co-pilot console index status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Day count: {result['day_count']}")
+    print(f"Latest day: {result['latest_day']}")
+    print(f"Missing artifact count: {result['missing_artifact_count']}")
+    print(f"Invalid artifact count: {result['invalid_artifact_count']}")
+    return 0
+
+
+def _cmd_evidence_monitor_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    lookback_days: int,
+    freshness_days: int,
+    governance_root: str,
+    output_root: str,
+) -> int:
+    from datetime import date as _date
+
+    try:
+        _date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid evidence-monitor-run input: invalid date format '{as_of_date}'")
+        return 2
+    if lookback_days <= 0:
+        print("invalid evidence-monitor-run input: lookback-days must be positive")
+        return 2
+    if freshness_days <= 0:
+        print("invalid evidence-monitor-run input: freshness-days must be positive")
+        return 2
+
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_evidence_freshness_drift_monitor(
+        db=database,
+        governance_root=governance_path.resolve(),
+        output_root=output_path.resolve(),
+        as_of_date=as_of_date,
+        lookback_days=lookback_days,
+        freshness_days=freshness_days,
+    )
+    if result.get("status") == "blocked_invalid_input":
+        print(f"invalid evidence-monitor-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Evidence monitor status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Phase count: {result['phase_count']}")
+    print(f"Red count: {result['red_count']}")
+    print(f"Yellow count: {result['yellow_count']}")
+    print(f"Missing context pattern count: {result['missing_context_pattern_count']}")
+    return 0
+
+
+def _cmd_market_data_readiness_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    symbols: str,
+    history_days: int,
+    option_symbol: str,
+    host: str,
+    port: int,
+    live: bool,
+    output_root: str,
+) -> int:
+    import os
+
+    symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    opt_sym = option_symbol if option_symbol else ""
+    effective_host = os.environ.get("FUTU_OPEND_HOST", host)
+    try:
+        effective_port = int(os.environ.get("FUTU_OPEND_PORT", str(port)))
+    except ValueError:
+        effective_port = port
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_market_data_readiness(
+        output_root=output_path.resolve(),
+        as_of_date=as_of_date,
+        host=effective_host,
+        port=effective_port,
+        symbols=symbol_list,
+        history_days=history_days,
+        option_symbol=opt_sym,
+        live=live,
+        db=database,
+    )
+    if result.get("status") == "blocked_invalid_input":
+        warnings = result.get("warnings", ["unknown"])
+        print(f"invalid market-data-readiness-run input: {warnings[0]}")
+        return 2
+    print(f"Market data readiness status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    if result.get("recommended_actions"):
+        for action in result["recommended_actions"]:
+            print(f"  recommended: {action}")
+    if result["status"] == "provider_unavailable":
+        return 3
+    return 0
+
+
+def _cmd_evidence_refresh_plan_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    lookback_days: int,
+    max_items: int,
+    governance_root: str,
+    output_root: str,
+) -> int:
+    from datetime import date as _date
+
+    try:
+        _date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid evidence-refresh-plan-run input: invalid date format '{as_of_date}'")
+        return 2
+    if lookback_days <= 0:
+        print("invalid evidence-refresh-plan-run input: lookback-days must be positive")
+        return 2
+    if max_items <= 0:
+        print("invalid evidence-refresh-plan-run input: max-items must be positive")
+        return 2
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    database = _ensure_database(paths)
+    result = run_evidence_refresh_planner(
+        db=database,
+        governance_root=governance_path.resolve(),
+        output_root=output_path.resolve(),
+        as_of_date=as_of_date,
+        lookback_days=lookback_days,
+        max_items=max_items,
+    )
+    if result.get("status") == "blocked_invalid_input":
+        print(f"invalid evidence-refresh-plan-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Evidence refresh plan status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Plan id: {result['plan_id']}")
+    print(f"Candidate count: {result['candidate_count']}")
+    print(f"Blocked count: {result['blocked_count']}")
+    return 0
+
+
+def _cmd_research_context_pack_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    tickers: str,
+    lookback_days: int,
+    max_items_per_ticker: int,
+    governance_root: str,
+    output_root: str,
+) -> int:
+    from datetime import date as _date
+
+    try:
+        _date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid research-context-pack-run input: invalid date format '{as_of_date}'")
+        return 2
+    if not tickers:
+        print("invalid research-context-pack-run input: tickers required")
+        return 2
+    if lookback_days <= 0:
+        print("invalid research-context-pack-run input: lookback-days must be positive")
+        return 2
+    if max_items_per_ticker <= 0:
+        print("invalid research-context-pack-run input: max-items-per-ticker must be positive")
+        return 2
+    ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    database = _ensure_database(paths)
+    result = run_research_context_pack(
+        db=database,
+        governance_root=governance_path.resolve(),
+        output_root=output_path.resolve(),
+        as_of_date=as_of_date,
+        tickers=ticker_list,
+        lookback_days=lookback_days,
+        max_items_per_ticker=max_items_per_ticker,
+    )
+    if result.get("status") == "blocked_invalid_input":
+        print(f"invalid research-context-pack-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Research context pack status: {result['status']}")
+    print(f"Pack id: {result['pack_id']}")
+    print(f"Tickers: {', '.join(result['tickers'])}")
+    print(f"Missing context: {len(result['missing_context'])}")
+    print(f"Warnings: {len(result['warnings'])}")
+    return 0
+
+
+def _cmd_research_context_prompt_pack_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    tickers: str,
+    roles: str,
+    max_block_chars: int,
+    governance_root: str,
+    output_root: str,
+) -> int:
+    from datetime import date as _date
+
+    try:
+        _date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid research-context-prompt-pack-run input: invalid date format '{as_of_date}'")
+        return 2
+    if not tickers:
+        print("invalid research-context-prompt-pack-run input: tickers required")
+        return 2
+    if max_block_chars <= 0:
+        print("invalid research-context-prompt-pack-run input: max-block-chars must be positive")
+        return 2
+    ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
+    role_list = [r.strip() for r in roles.split(",") if r.strip()] if roles.strip() else None
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    database = _ensure_database(paths)
+    result = run_research_context_prompt_pack(
+        db=database,
+        governance_root=governance_path.resolve(),
+        output_root=output_path.resolve(),
+        as_of_date=as_of_date,
+        tickers=ticker_list,
+        roles=role_list,
+        max_block_chars=max_block_chars,
+    )
+    if result.get("status") in {"blocked_invalid_input", "blocked_missing_context"}:
+        print(f"invalid research-context-prompt-pack-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Research context prompt pack status: {result['status']}")
+    print(f"Prompt pack id: {result['prompt_pack_id']}")
+    print(f"Tickers: {', '.join(result['tickers'])}")
+    print(f"Roles: {', '.join(result['roles'])}")
+    print(f"Omitted context: {len(result['omitted_context'])}")
+    print(f"Warnings: {len(result['warnings'])}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -602,6 +943,57 @@ def build_parser() -> argparse.ArgumentParser:
         help="Root directory for decision journal artifacts.",
     )
 
+    copilot_parser = subparsers.add_parser("boss-copilot-brief-run", help="Run boss co-pilot daily brief.")
+    copilot_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    copilot_parser.add_argument("--output-root", default="output/governance", help="Root directory for boss co-pilot brief artifacts.")
+    copilot_parser.add_argument("--max-priorities", default=8, type=int, help="Maximum research priorities to include.")
+
+    console_parser = subparsers.add_parser("copilot-console-index-run", help="Run static co-pilot console index.")
+    console_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    console_parser.add_argument("--lookback-days", default=14, type=int, help="Number of calendar days to scan.")
+    console_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
+    console_parser.add_argument("--output-root", default="output/governance", help="Output root for console index artifacts.")
+
+    monitor_parser = subparsers.add_parser("evidence-monitor-run", help="Run evidence freshness and drift monitor.")
+    monitor_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    monitor_parser.add_argument("--lookback-days", default=14, type=int, help="Number of calendar days to inspect.")
+    monitor_parser.add_argument("--freshness-days", default=3, type=int, help="Freshness threshold in calendar days.")
+    monitor_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
+    monitor_parser.add_argument("--output-root", default="output/governance", help="Output root for evidence monitor artifacts.")
+
+    readiness_parser = subparsers.add_parser("market-data-readiness-run", help="Run Futu market-data provider readiness check.")
+    readiness_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    readiness_parser.add_argument("--symbols", default="US.AAPL,HK.00700", help="Comma-separated symbols.")
+    readiness_parser.add_argument("--history-days", default=30, type=int, help="History lookback in days.")
+    readiness_parser.add_argument("--option-symbol", default="US.AAPL", help="Option chain symbol; empty string to skip.")
+    readiness_parser.add_argument("--host", default="127.0.0.1", help="OpenD host.")
+    readiness_parser.add_argument("--port", default=11111, type=int, help="OpenD port.")
+    readiness_parser.add_argument("--live", action="store_true", help="Enable live OpenD quote calls.")
+    readiness_parser.add_argument("--output-root", default="output/governance", help="Output root for readiness artifacts.")
+
+    refresh_parser = subparsers.add_parser("evidence-refresh-plan-run", help="Run controlled evidence refresh planner.")
+    refresh_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    refresh_parser.add_argument("--lookback-days", default=14, type=int, help="Number of calendar days to inspect.")
+    refresh_parser.add_argument("--max-items", default=12, type=int, help="Maximum plan items.")
+    refresh_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
+    refresh_parser.add_argument("--output-root", default="output/governance", help="Output root for refresh plan artifacts.")
+
+    ctx_parser = subparsers.add_parser("research-context-pack-run", help="Run read-only research context pack assembly.")
+    ctx_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    ctx_parser.add_argument("--tickers", required=True, help="Comma-separated ticker symbols.")
+    ctx_parser.add_argument("--lookback-days", default=180, type=int, help="Number of calendar days to look back.")
+    ctx_parser.add_argument("--max-items-per-ticker", default=8, type=int, help="Max source refs per ticker.")
+    ctx_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
+    ctx_parser.add_argument("--output-root", default="output/governance", help="Output root for context pack artifacts.")
+
+    prompt_parser = subparsers.add_parser("research-context-prompt-pack-run", help="Run P48 research context prompt-pack dry-run.")
+    prompt_parser.add_argument("--as-of-date", required=True, help="As-of date YYYY-MM-DD.")
+    prompt_parser.add_argument("--tickers", required=True, help="Comma-separated ticker symbols.")
+    prompt_parser.add_argument("--roles", default="", help="Comma-separated role names (default: all supported).")
+    prompt_parser.add_argument("--max-block-chars", type=int, default=1200, help="Max chars per role context block.")
+    prompt_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
+    prompt_parser.add_argument("--output-root", default="output/governance", help="Output root for prompt pack artifacts.")
+
     return parser
 
 
@@ -677,6 +1069,71 @@ def main(argv: Sequence[str] | None = None) -> int:
             paths,
             input_path=args.input,
             as_of_date=args.as_of_date,
+            output_root=args.output_root,
+        )
+    if args.command == "boss-copilot-brief-run":
+        return _cmd_boss_copilot_brief_run(
+            paths,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+            max_priorities=args.max_priorities,
+        )
+    if args.command == "copilot-console-index-run":
+        return _cmd_copilot_console_index_run(
+            paths,
+            as_of_date=args.as_of_date,
+            lookback_days=args.lookback_days,
+            governance_root=args.governance_root,
+            output_root=args.output_root,
+        )
+    if args.command == "evidence-monitor-run":
+        return _cmd_evidence_monitor_run(
+            paths,
+            as_of_date=args.as_of_date,
+            lookback_days=args.lookback_days,
+            freshness_days=args.freshness_days,
+            governance_root=args.governance_root,
+            output_root=args.output_root,
+        )
+    if args.command == "market-data-readiness-run":
+        return _cmd_market_data_readiness_run(
+            paths,
+            as_of_date=args.as_of_date,
+            symbols=args.symbols,
+            history_days=args.history_days,
+            option_symbol=args.option_symbol,
+            host=args.host,
+            port=args.port,
+            live=args.live,
+            output_root=args.output_root,
+        )
+    if args.command == "evidence-refresh-plan-run":
+        return _cmd_evidence_refresh_plan_run(
+            paths,
+            as_of_date=args.as_of_date,
+            lookback_days=args.lookback_days,
+            max_items=args.max_items,
+            governance_root=args.governance_root,
+            output_root=args.output_root,
+        )
+    if args.command == "research-context-pack-run":
+        return _cmd_research_context_pack_run(
+            paths,
+            as_of_date=args.as_of_date,
+            tickers=args.tickers,
+            lookback_days=args.lookback_days,
+            max_items_per_ticker=args.max_items_per_ticker,
+            governance_root=args.governance_root,
+            output_root=args.output_root,
+        )
+    if args.command == "research-context-prompt-pack-run":
+        return _cmd_research_context_prompt_pack_run(
+            paths,
+            as_of_date=args.as_of_date,
+            tickers=args.tickers,
+            roles=args.roles,
+            max_block_chars=args.max_block_chars,
+            governance_root=args.governance_root,
             output_root=args.output_root,
         )
 

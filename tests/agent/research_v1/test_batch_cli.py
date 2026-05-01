@@ -755,3 +755,455 @@ def test_decision_journal_run_cli_rejects_missing_file(tmp_path, capsys):
 
     assert code == 2
     assert "file not found" in capsys.readouterr().out
+
+
+# ── P42 boss-copilot-brief-run CLI tests ────────────────────────────────
+
+def test_boss_copilot_brief_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "brief_ready",
+            "output_dir": str(output_dir),
+            "priority_count": 2,
+            "high_priority_count": 1,
+            "manual_review_count": 0,
+            "missing_context_count": 0,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_copilot_daily_brief", fake_run)
+    code = main(["--app-root", str(app_root), "boss-copilot-brief-run", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Boss co-pilot brief status: brief_ready" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_boss_copilot_brief_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "boss-copilot-brief-run", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid boss-copilot-brief-run input" in capsys.readouterr().out
+
+
+def test_boss_copilot_brief_run_cli_rejects_non_positive_max_priorities(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "boss-copilot-brief-run", "--as-of-date", "2026-04-30", "--max-priorities", "0"])
+
+    assert code == 2
+    assert "max-priorities must be positive" in capsys.readouterr().out
+
+
+# ── P43 copilot-console-index-run CLI tests ─────────────────────────────
+
+def test_copilot_console_index_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "console_ready",
+            "output_dir": str(output_dir),
+            "day_count": 2,
+            "latest_day": "2026-04-30",
+            "missing_artifact_count": 3,
+            "invalid_artifact_count": 0,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_copilot_console_index", fake_run)
+    code = main(["--app-root", str(app_root), "copilot-console-index-run", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Co-pilot console index status: console_ready" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_copilot_console_index_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "copilot-console-index-run", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid copilot-console-index-run input" in capsys.readouterr().out
+
+
+def test_copilot_console_index_run_cli_rejects_non_positive_lookback(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "copilot-console-index-run", "--as-of-date", "2026-04-30", "--lookback-days", "0"])
+
+    assert code == 2
+    assert "lookback-days must be positive" in capsys.readouterr().out
+
+
+# ── P44 Evidence Monitor CLI tests ──────────────────────────────────────
+
+def test_evidence_monitor_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "monitor_yellow",
+            "output_dir": str(output_dir),
+            "phase_count": 8,
+            "red_count": 0,
+            "yellow_count": 1,
+            "missing_context_pattern_count": 2,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_evidence_freshness_drift_monitor", fake_run)
+    code = main(["--app-root", str(app_root), "evidence-monitor-run", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Evidence monitor status: monitor_yellow" in out
+
+
+def test_evidence_monitor_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "evidence-monitor-run", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid evidence-monitor-run input" in capsys.readouterr().out
+
+
+def test_evidence_monitor_run_cli_rejects_non_positive_lookback(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "evidence-monitor-run", "--as-of-date", "2026-04-30", "--lookback-days", "0"])
+
+    assert code == 2
+    assert "lookback-days must be positive" in capsys.readouterr().out
+
+
+def test_evidence_monitor_run_cli_rejects_non_positive_freshness(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "evidence-monitor-run", "--as-of-date", "2026-04-30", "--freshness-days", "0"])
+
+    assert code == 2
+    assert "freshness-days must be positive" in capsys.readouterr().out
+
+
+# ── P45 CLI tests ──────────────────────────────────────────────────────
+
+def test_market_data_readiness_run_cli_success(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    def fake_run(**kwargs):
+        output_dir = Path(kwargs["output_root"]) / kwargs["as_of_date"]
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "provider_ready",
+            "output_dir": str(output_dir),
+            "report_id": "abc123",
+            "source_hash": "def456",
+            "recommended_actions": [],
+            "paths": {},
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_data_readiness", fake_run)
+    code = main(["--app-root", str(app_root), "market-data-readiness-run", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Market data readiness status: provider_ready" in out
+
+
+def test_market_data_readiness_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "market-data-readiness-run", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid market-data-readiness-run input" in capsys.readouterr().out
+
+
+def test_market_data_readiness_run_cli_returns_3_for_unavailable(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    def fake_run(**kwargs):
+        output_dir = Path(kwargs["output_root"]) / kwargs["as_of_date"]
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "provider_unavailable",
+            "output_dir": str(output_dir),
+            "report_id": "abc123",
+            "source_hash": "def456",
+            "recommended_actions": ["install_futu_api_sdk"],
+            "paths": {},
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_data_readiness", fake_run)
+    code = main(["--app-root", str(app_root), "market-data-readiness-run", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 3
+    assert "provider_unavailable" in out
+    assert "install_futu_api_sdk" in out
+
+
+def test_market_data_readiness_run_cli_passes_live_flag(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured["live"] = kwargs.get("live")
+        captured["symbols"] = kwargs.get("symbols")
+        output_dir = Path(kwargs["output_root"]) / kwargs["as_of_date"]
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "provider_not_tested_live",
+            "output_dir": str(output_dir),
+            "report_id": "abc123",
+            "source_hash": "def456",
+            "recommended_actions": [],
+            "paths": {},
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_data_readiness", fake_run)
+    code = main(["--app-root", str(app_root), "market-data-readiness-run", "--as-of-date", "2026-04-30", "--symbols", "US.MSFT,US.GOOGL"])
+
+    assert code == 0
+    assert captured["live"] is False
+    assert captured["symbols"] == ["US.MSFT", "US.GOOGL"]
+
+
+# ── P46 CLI tests ──────────────────────────────────────────────────────
+
+def test_evidence_refresh_plan_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path
+    (app_root / "data").mkdir()
+
+    def fake_run(**kwargs):
+        return {
+            "status": "refresh_plan_ready",
+            "output_dir": str(app_root / "output" / "governance" / "2026-04-30"),
+            "plan_id": "plan1",
+            "candidate_count": 2,
+            "blocked_count": 1,
+            "paths": {},
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_evidence_refresh_planner", fake_run)
+    code = main(["--app-root", str(app_root), "evidence-refresh-plan-run", "--as-of-date", "2026-04-30"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Evidence refresh plan status: refresh_plan_ready" in out
+    assert "Candidate count: 2" in out
+
+
+def test_evidence_refresh_plan_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "evidence-refresh-plan-run", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid evidence-refresh-plan-run input" in capsys.readouterr().out
+
+
+def test_evidence_refresh_plan_cli_rejects_non_positive_max_items(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "evidence-refresh-plan-run", "--as-of-date", "2026-04-30", "--max-items", "0"])
+
+    assert code == 2
+    assert "max-items must be positive" in capsys.readouterr().out
+
+
+def test_evidence_refresh_plan_cli_passes_params(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path
+    (app_root / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured["lookback_days"] = kwargs.get("lookback_days")
+        captured["max_items"] = kwargs.get("max_items")
+        return {
+            "status": "refresh_plan_noop",
+            "output_dir": str(app_root / "output" / "governance" / "2026-04-30"),
+            "plan_id": "plan1",
+            "candidate_count": 0,
+            "blocked_count": 0,
+            "paths": {},
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_evidence_refresh_planner", fake_run)
+    code = main(["--app-root", str(app_root), "evidence-refresh-plan-run", "--as-of-date", "2026-04-30", "--lookback-days", "7", "--max-items", "5"])
+
+    assert code == 0
+    assert captured["lookback_days"] == 7
+    assert captured["max_items"] == 5
+
+
+def test_research_context_pack_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path
+    (app_root / "data").mkdir()
+
+    def fake_run(**kwargs):
+        return {
+            "status": "context_pack_ready",
+            "pack_id": "p47-2026-05-01-abc123def456",
+            "tickers": ["AAPL", "MSFT"],
+            "missing_context": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_research_context_pack", fake_run)
+    code = main(["--app-root", str(app_root), "research-context-pack-run", "--as-of-date", "2026-05-01", "--tickers", "AAPL,MSFT"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Research context pack status: context_pack_ready" in out
+    assert "Pack id: p47-2026-05-01-abc123def456" in out
+    assert "Tickers: AAPL, MSFT" in out
+
+
+def test_research_context_pack_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "research-context-pack-run", "--as-of-date", "bad-date", "--tickers", "AAPL"])
+
+    assert code == 2
+    assert "invalid research-context-pack-run input" in capsys.readouterr().out
+
+
+def test_research_context_pack_cli_rejects_negative_lookback(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "research-context-pack-run", "--as-of-date", "2026-05-01", "--tickers", "AAPL", "--lookback-days", "0"])
+
+    assert code == 2
+    assert "lookback-days must be positive" in capsys.readouterr().out
+
+
+def test_research_context_pack_cli_passes_params(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path
+    (app_root / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured["tickers"] = kwargs.get("tickers")
+        captured["lookback_days"] = kwargs.get("lookback_days")
+        captured["max_items_per_ticker"] = kwargs.get("max_items_per_ticker")
+        return {
+            "status": "context_pack_missing",
+            "pack_id": "p47-2026-05-01-xxx",
+            "tickers": ["NVDA"],
+            "missing_context": ["missing_ticker_context:NVDA"],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_research_context_pack", fake_run)
+    code = main(["--app-root", str(app_root), "research-context-pack-run", "--as-of-date", "2026-05-01", "--tickers", "NVDA", "--lookback-days", "90", "--max-items-per-ticker", "4"])
+
+    assert code == 0
+    assert captured["tickers"] == ["NVDA"]
+    assert captured["lookback_days"] == 90
+    assert captured["max_items_per_ticker"] == 4
+
+
+def test_research_context_prompt_pack_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    (tmp_path / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "prompt_pack_ready",
+            "prompt_pack_id": "p48-2026-05-01-abc",
+            "tickers": ["AAPL"],
+            "roles": ["risk"],
+            "omitted_context": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_research_context_prompt_pack", fake_run)
+    code = main(["--app-root", str(tmp_path), "research-context-prompt-pack-run", "--as-of-date", "2026-05-01", "--tickers", "AAPL", "--roles", "risk"])
+
+    assert code == 0
+    assert captured["roles"] == ["risk"]
+    out = capsys.readouterr().out
+    assert "Research context prompt pack status: prompt_pack_ready" in out
+
+
+def test_research_context_prompt_pack_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "research-context-prompt-pack-run", "--as-of-date", "bad-date", "--tickers", "AAPL"])
+
+    assert code == 2
+    assert "invalid research-context-prompt-pack-run input" in capsys.readouterr().out
+
+
+def test_research_context_prompt_pack_cli_rejects_non_positive_max_block(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "research-context-prompt-pack-run", "--as-of-date", "2026-05-01", "--tickers", "AAPL", "--max-block-chars", "0"])
+
+    assert code == 2
+    assert "max-block-chars must be positive" in capsys.readouterr().out
+
+
+def test_research_context_prompt_pack_cli_passes_params(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    (tmp_path / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "prompt_pack_ready",
+            "prompt_pack_id": "p48-2026-05-01-xxx",
+            "tickers": ["AAPL", "MSFT"],
+            "roles": ["fundamentals", "risk"],
+            "omitted_context": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_research_context_prompt_pack", fake_run)
+    code = main(["--app-root", str(tmp_path), "research-context-prompt-pack-run", "--as-of-date", "2026-05-01", "--tickers", "AAPL,MSFT", "--roles", "fundamentals,risk", "--max-block-chars", "800"])
+
+    assert code == 0
+    assert captured["tickers"] == ["AAPL", "MSFT"]
+    assert captured["roles"] == ["fundamentals", "risk"]
+    assert captured["max_block_chars"] == 800

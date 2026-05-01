@@ -553,6 +553,137 @@ P41 is behavioral guardrail evidence only. It does not block action,
 call `HermesResearchApp.run()`, `final_judge`, place orders, or alter
 recommendations.
 
+### P42 Boss Co-Pilot Daily Brief
+
+```
+agent/research_v1/boss_copilot_daily_brief.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli boss-copilot-brief-run \
+  --as-of-date 2026-04-30 \
+  --output-root output/governance \
+  --max-priorities 8
+```
+
+P42 aggregates existing P36-P41 evidence into a daily boss-facing
+research-priority brief. It reads recommendation outcomes, market regime,
+fundamental quality, candidate pools, research memory, and decision-journal
+guardrails, then writes `p42_boss_copilot_daily_brief.{json,md}` under
+`output/governance/YYYY-MM-DD/`.
+
+P42 is daily research-priority evidence only. It does not create
+recommendations, instruct trades, submit orders, schedule jobs, send
+notifications, or mutate prior evidence.
+
+### P43 Read-Only Co-Pilot Console Index
+
+P43 scans existing P36-P42 governance artifacts and writes a static local
+console index: `p43_copilot_console_index.json`, `.md`, and `.html`. It is a
+navigation layer over existing evidence, not a live dashboard or trading surface.
+
+P43 is a static read-only evidence index. It does not run research, call prior
+phase runtimes, schedule jobs, send notifications, recommend trades, or mutate
+research decisions.
+
+### P44 Evidence Freshness & Drift Monitor
+
+P44 monitors existing P36-P43 evidence for freshness, coverage, source-hash
+churn, invalid artifacts, and repeated missing-context patterns. It writes
+`p44_evidence_freshness_drift_monitor.json` and `.md` under
+`output/governance/YYYY-MM-DD/`.
+
+P44 is evidence monitoring only. It does not refresh evidence, schedule jobs,
+send notifications, run prior phases, recommend trades, or mutate research
+decisions.
+
+### P45 Futu Market Data Readiness
+
+P45 is a read-only Futu OpenD readiness gate. It checks whether the `futu-api`
+SDK is installed, whether OpenD is reachable, and optionally verifies live
+snapshot/history/option-chain calls. It writes `p45_market_data_readiness.json`
+and `.md` under `output/governance/YYYY-MM-DD/`.
+
+P45 is not a trading integration. It does not place orders, unlock trading,
+use trade contexts, query positions, approve production adoption, train models,
+schedule jobs, or mutate research decisions.
+
+CLI usage:
+
+```bash
+python -m agent.research_v1.batch_cli market-data-readiness-run \
+  --as-of-date 2026-04-30 \
+  --symbols US.AAPL,HK.00700 \
+  --history-days 30 \
+  --option-symbol US.AAPL \
+  --live \
+  --output-root output/governance
+```
+
+Futu OpenD must be running locally (default `127.0.0.1:11111`). The Python
+runtime must have `futu-api>=10.4.6408` installed. Host and port can be
+overridden via `FUTU_OPEND_HOST` and `FUTU_OPEND_PORT` environment variables.
+
+### P46 Controlled Evidence Refresh Planner
+
+P46 consumes the latest P44 evidence freshness/drift monitor and P45 Futu
+market-data readiness report, then writes a dry-run refresh plan:
+
+```text
+output/governance/YYYY-MM-DD/p46_evidence_refresh_plan.json
+output/governance/YYYY-MM-DD/p46_evidence_refresh_plan.md
+```
+
+Example:
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli evidence-refresh-plan-run \
+  --as-of-date 2026-04-30 \
+  --lookback-days 14 \
+  --max-items 12
+```
+
+P46 does not refresh evidence, call market-data providers, schedule jobs, or
+mutate prior evidence. It only produces a manual plan.
+
+### P47 Research Context Pack
+
+P47 aggregates P36-P46 evidence into a read-only research context pack for
+one or more tickers. It does not inject context into research prompts, call
+research runtimes, or mutate prior evidence:
+
+```text
+output/governance/YYYY-MM-DD/p47_research_context_pack.json
+output/governance/YYYY-MM-DD/p47_research_context_pack.md
+```
+
+Example:
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli research-context-pack-run \
+  --as-of-date 2026-05-01 \
+  --tickers AAPL,MSFT,NVDA \
+  --lookback-days 180 \
+  --max-items-per-ticker 8
+```
+
+### P48 Research Context Prompt Pack Dry-Run
+
+P48 converts the latest P47 research context pack into role-specific prompt-context previews:
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli research-context-prompt-pack-run \
+  --as-of-date 2026-05-01 \
+  --tickers AAPL,MSFT \
+  --roles fundamentals,risk \
+  --max-block-chars 1200 \
+  --output-root output/governance
+```
+
+It writes `p48_research_context_prompt_pack.json` and `.md` under `output/governance/YYYY-MM-DD/`. P48 is dry-run only: it does not call analysts, LLMs, `HermesResearchApp.run()`, `final_judge`, providers, or broker/order APIs, and it does not mutate `SubagentTask.required_context`.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -654,6 +785,70 @@ Use Python 3.11:
   -q
 ```
 
+### P42 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_boss_copilot_daily_brief.py \
+  -q
+```
+
+### P43 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_copilot_console_index.py \
+  -q
+```
+
+### P44 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_evidence_freshness_drift_monitor.py \
+  -q
+```
+
+### P45 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_market_data_readiness.py \
+  -q
+```
+
+Optional live smoke test (requires running OpenD + installed futu-api):
+
+```bash
+HERMES_LIVE_FUTU=1 /opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_futu_live_smoke.py \
+  -q
+```
+
+### P46 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_evidence_refresh_planner.py \
+  -q
+```
+
+### P47 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_research_context_pack.py \
+  -q
+```
+
+### P48 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_research_context_prompt_pack.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -685,7 +880,7 @@ Recent result:
 60 passed
 ```
 
-### Full P20-P41 Governance Chain
+### Full P20-P44 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -724,6 +919,11 @@ Recent result:
   tests/agent/research_v1/test_candidate_pool.py \
   tests/agent/research_v1/test_research_memory_pack.py \
   tests/agent/research_v1/test_decision_journal_guardrails.py \
+  tests/agent/research_v1/test_boss_copilot_daily_brief.py \
+  tests/agent/research_v1/test_copilot_console_index.py \
+  tests/agent/research_v1/test_evidence_freshness_drift_monitor.py \
+  tests/agent/research_v1/test_market_data_readiness.py \
+  tests/agent/research_v1/test_evidence_refresh_planner.py \
   -q
 ```
 

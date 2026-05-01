@@ -101,6 +101,38 @@ The flow is one-way: decision journal entries do not call
 `HermesResearchApp.run()`, `final_judge`, `JudgeInputPacket`, or
 broker/order APIs.
 
+#### P42 Boss Co-Pilot Daily Brief
+
+`boss_copilot_daily_brief.py` reads persisted P36-P41 evidence and emits a
+daily research-priority brief for the boss. The flow is one-way: P42 does
+not call `HermesResearchApp.run()`, `final_judge`, P36-P41 runtime commands,
+or broker/order APIs. Missing upstream evidence is surfaced as limited
+context rather than hidden.
+
+#### P43 Read-Only Co-Pilot Console Index
+
+`copilot_console_index.py` scans existing files under `output/governance/YYYY-MM-DD/` and writes a static index for navigation. The flow is one-way: P43 does not invoke P36-P42 runtimes, `HermesResearchApp.run()`, `final_judge`, or broker/order APIs.
+
+#### P44 Evidence Freshness & Drift Monitor
+
+`evidence_freshness_drift_monitor.py` reads persisted P36-P43 evidence and governance artifacts, then emits a deterministic evidence-health report. The flow is one-way: P44 does not invoke P36-P43 runtimes, `HermesResearchApp.run()`, `final_judge`, or broker/order APIs.
+
+#### P45 Futu Market Data Readiness
+
+`market_data_readiness.py` checks whether the Futu SDK is installed, whether OpenD is reachable, and optionally verifies live snapshot/history/option-chain calls. It writes readiness artifacts under `output/governance/YYYY-MM-DD/`. The flow is one-way: P45 does not place orders, unlock trading, use trade contexts, query positions, invoke P36-P44 runtimes, or mutate research decisions.
+
+#### P46 Controlled Evidence Refresh Planner
+
+`evidence_refresh_planner.py` consumes the latest P44 freshness/drift monitor and P45 market-data readiness report, then writes a dry-run refresh plan under `output/governance/YYYY-MM-DD/`. The flow is one-way: P46 does not refresh evidence, call market-data providers, invoke P36-P45 runtimes, or mutate research decisions.
+
+#### P47 Research Context Pack
+
+`research_context_pack.py` reads persisted P36-P46 evidence and governance artifacts, then assembles a read-only research context pack for one or more tickers. The flow is one-way: P47 does not call `HermesResearchApp.run()`, `final_judge`, P36-P46 runtimes, market-data providers, or broker/order APIs. It does not inject context into research prompts or judge prompts in v1.
+
+#### P48 Research Context Prompt Pack Dry-Run
+
+`research_context_prompt_pack.py` reads the latest P47 context pack from DB or artifact, maps ticker context to analyst roles, and writes role-specific prompt-context previews plus a dry-run injection manifest. The flow is one-way: P48 does not call analysts, LLMs, `HermesResearchApp.run()`, `SubagentExecutor`, `final_judge`, P36-P47 runtimes, market-data providers, or broker/order APIs. It does not mutate `SubagentTask.required_context` or inject context into live prompts.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
 
