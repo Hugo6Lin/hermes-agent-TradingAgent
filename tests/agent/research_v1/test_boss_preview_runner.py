@@ -176,3 +176,80 @@ def test_safe_provider_preserves_prefixed_symbols():
     safe = SafeMarketRegimeProvider(inner)
     safe.fetch_history("US.AMZN", "2026-01-01", "2026-05-01")
     assert inner.called_with == ["US.AMZN"]
+
+
+# --- P49: --no-live provider tests ---
+
+from agent.research_v1.boss_preview_runner import _build_safe_p37_provider
+
+
+def test_build_safe_p37_provider_offline_returns_empty_provider():
+    """When live=False and provider=None, _build_safe_p37_provider must not import FutuQuoteClient."""
+    safe = _build_safe_p37_provider(None, live=False)
+    assert safe.data_source == "p49_offline"
+    rows = safe.fetch_history("SPY", "2026-01-01", "2026-05-01")
+    assert rows == []
+    rows = safe.fetch_history("VIX", "2026-01-01", "2026-05-01")
+    assert rows == []
+
+
+def test_build_safe_p37_provider_preserves_custom_provider_even_when_offline():
+    """When a custom provider is given, it is wrapped by SafeMarketRegimeProvider even when live=False."""
+    class CustomProvider:
+        data_source = "custom"
+        price_adjustment = "adjusted"
+        def fetch_history(self, symbol, start_date, end_date):
+            return [{"symbol": symbol, "date": "2026-05-01", "close": 42.0}]
+
+    safe = _build_safe_p37_provider(CustomProvider(), live=False)
+    assert safe.data_source == "custom"
+    rows = safe.fetch_history("SPY", "2026-01-01", "2026-05-01")
+    assert rows[0]["symbol"] == "US.SPY"
+
+
+def test_run_boss_preview_no_live_does_not_instantiate_futu(monkeypatch, tmp_path: Path):
+    """run_boss_preview with live=False must not construct FutuQuoteClient."""
+    from agent.research_v1.boss_preview_runner import _build_safe_p37_provider as real_build
+
+    constructed = []
+    original_init = type.__call__
+
+    class FutuQuoteClientSentinel:
+        pass
+
+    def track_futu_construct(cls, *args, **kwargs):
+        if cls.__name__ == "FutuQuoteClient":
+            constructed.append(True)
+        return original_init(cls, *args, **kwargs)
+
+    db = ResearchDatabase(str(tmp_path / "test.db"))
+    db.initialize()
+    result = run_boss_preview(
+        db=db,
+        tickers=["NVDA"],
+        as_of_date="2026-05-01",
+        output_root=tmp_path / "output" / "governance",
+        governance_root=tmp_path / "output" / "governance",
+        live=False,
+        max_candidates=3,
+        phase_runners={
+            "P45": lambda **kw: {"status": "provider_not_tested_live", "paths": {}, "warnings": []},
+            "P37": lambda **kw: {"status": "degraded_missing_inputs", "paths": {}, "warnings": ["no_live_data"]},
+            "P38": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P39": lambda **kw: {"status": "completed", "top_candidate": "NVDA", "candidate_count": 1, "paths": {}, "warnings": []},
+            "P40": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P41": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P42": lambda **kw: {"status": "brief_ready", "paths": {"md": tmp_path / "p42.md"}, "warnings": []},
+            "P43": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P44": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P46": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P47": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+            "P48": lambda **kw: {"status": "completed", "paths": {}, "warnings": []},
+        },
+    )
+    assert result["status"] in {"boss_preview_ready", "boss_preview_limited"}
+    assert (tmp_path / "output" / "governance" / "2026-05-01" / "boss_preview.md").exists()
+    assert (tmp_path / "output" / "governance" / "2026-05-01" / "boss_preview.json").exists()
+    # The safe provider for live=False should be the offline empty provider, not Futu
+    safe = _build_safe_p37_provider(None, live=False)
+    assert safe.data_source == "p49_offline"

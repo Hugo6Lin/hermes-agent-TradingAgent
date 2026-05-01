@@ -263,11 +263,16 @@ _VIX_FALLBACK_CHAIN = ("US.VIX", "US.VXX", "US.UVXY")
 class SafeMarketRegimeProvider:
     """Wraps a market-data provider with Futu symbol mapping and VIX fallback."""
 
-    data_source = "futu_opend"
-    price_adjustment = "adjusted"
-
     def __init__(self, inner: Any) -> None:
         self._inner = inner
+
+    @property
+    def data_source(self) -> str:
+        return getattr(self._inner, "data_source", "futu_opend")
+
+    @property
+    def price_adjustment(self) -> str:
+        return getattr(self._inner, "price_adjustment", "adjusted")
 
     def _futu_symbol(self, symbol: str) -> str:
         if symbol.startswith(("US.", "HK.", "SH.", "SZ.", "SG.")):
@@ -335,9 +340,19 @@ def _safe_call(phase_id: str, fn: Callable[..., dict[str, Any]], data_source: st
 # --- P49-B: Main runtime ---
 
 
-def _build_safe_p37_provider(provider: Any | None) -> Any:
+def _build_safe_p37_provider(provider: Any | None, live: bool = True) -> Any:
     if provider is not None:
         return SafeMarketRegimeProvider(provider)
+
+    if not live:
+        class _EmptyProvider:
+            data_source = "p49_offline"
+            price_adjustment = "none"
+
+            def fetch_history(self, symbol: str, start_date: Any, end_date: Any) -> list[dict[str, Any]]:
+                return []
+
+        return SafeMarketRegimeProvider(_EmptyProvider())
 
     class _DefaultFutuProvider:
         data_source = "futu_opend"
@@ -404,7 +419,7 @@ def run_boss_preview(db: Any, tickers: list[str], as_of_date: str, output_root: 
     p45_symbols = futu_symbols_for_tickers(normalized)
     option_symbol = next((s for s in p45_symbols if s.startswith("US.")), "US.AAPL")
     phase_results.append(_safe_call("P45", phase_runners["P45"], "live" if live else "environment", "Checked Futu market-data readiness.", output_root=output_root, as_of_date=as_of_date, symbols=p45_symbols, option_symbol=option_symbol, live=live, provider=provider))
-    phase_results.append(_safe_call("P37", phase_runners["P37"], "live" if live else "provider", "Attempted market-regime snapshot.", db=db, as_of_date=date.fromisoformat(as_of_date), output_root=output_root, provider=_build_safe_p37_provider(provider)))
+    phase_results.append(_safe_call("P37", phase_runners["P37"], "live" if live else "provider", "Attempted market-regime snapshot.", db=db, as_of_date=date.fromisoformat(as_of_date), output_root=output_root, provider=_build_safe_p37_provider(provider, live=live)))
     phase_results.append(_safe_call("P38", phase_runners["P38"], "sample", "Scored preview sample fundamentals.", db=db, input_payload=p38_input, as_of_date=as_of_date, output_root=output_root))
     phase_results.append(_safe_call("P39", phase_runners["P39"], "sample", "Ranked preview candidate pool.", db=db, input_payload=p39_input, as_of_date=as_of_date, output_root=output_root, max_candidates=max_candidates))
     phase_results.append(_safe_call("P40", phase_runners["P40"], "database", "Collected prior research memory.", db=db, tickers=[t.replace("US.", "") for t in normalized[:2]], as_of_date=as_of_date, output_root=output_root))
