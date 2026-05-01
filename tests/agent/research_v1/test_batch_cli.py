@@ -1308,6 +1308,35 @@ def test_boss_pdf_brief_run_cli_invalid_input_returns_2(monkeypatch, tmp_path, c
     assert "invalid boss-pdf-brief-run input" in out
 
 
+def test_boss_pdf_brief_run_cli_passes_title(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "boss_pdf_brief_ready",
+            "ticker": kwargs["ticker"],
+            "html_path": "",
+            "pdf_path": "",
+            "manifest_path": "",
+            "verdict": "",
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_pdf_brief", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-pdf-brief-run",
+        "--preview-dir", str(tmp_path / "preview"),
+        "--ticker", "ZETA",
+        "--title", "Custom ZETA Report",
+    ])
+    assert code == 0
+    assert captured.get("title") == "Custom ZETA Report"
+
+
 # --- P51 CLI tests ---
 
 
@@ -1352,3 +1381,53 @@ def test_boss_console_run_cli_invalid_root_returns_2(monkeypatch, tmp_path, caps
     out = capsys.readouterr().out
     assert code == 2
     assert "invalid boss-console-run input" in out
+
+
+# --- P52 CLI tests ---
+
+
+def test_market_visual_run_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        out = tmp_path / "out" / "2026-05-01"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "p52_market_visual_snapshot.json").write_text("{}", encoding="utf-8")
+        return {
+            "status": "visual_assets_ready",
+            "output_dir": str(out),
+            "artifact_paths": [str(out / "p52_market_visual_snapshot.json")],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_visual_assets", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "market-visual-run",
+        "--tickers", "ZETA,NVDA",
+        "--as-of-date", "2026-05-01",
+        "--output-root", "output/governance",
+        "--no-live",
+    ])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Market visual status: visual_assets_ready" in out
+    assert "p52_market_visual_snapshot.json" in out
+
+
+def test_market_visual_run_cli_invalid_input_returns_2(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        return {"status": "blocked_invalid_input", "warnings": ["invalid_date_format"]}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_visual_assets", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "market-visual-run",
+        "--tickers", "ZETA",
+        "--as-of-date", "bad-date",
+    ])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "invalid market-visual-run input" in out
