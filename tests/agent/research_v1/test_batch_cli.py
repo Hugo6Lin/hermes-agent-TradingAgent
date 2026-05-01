@@ -1306,3 +1306,49 @@ def test_boss_pdf_brief_run_cli_invalid_input_returns_2(monkeypatch, tmp_path, c
     out = capsys.readouterr().out
     assert code == 2
     assert "invalid boss-pdf-brief-run input" in out
+
+
+# --- P51 CLI tests ---
+
+
+def test_boss_console_run_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        html = tmp_path / "console" / "boss_console.html"
+        js = tmp_path / "console" / "boss_console.json"
+        html.parent.mkdir(parents=True, exist_ok=True)
+        html.write_text("<html></html>", encoding="utf-8")
+        js.write_text("{}", encoding="utf-8")
+        return {"status": "boss_console_ready", "html_path": str(html), "json_path": str(js), "report_count": 1, "warnings": []}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_console", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-console-run",
+        "--governance-root", "output/governance",
+        "--output-dir", "output/console",
+        "--tickers", "ZETA,NVDA",
+    ])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Boss console status: boss_console_ready" in out
+    assert "HTML:" in out
+
+
+def test_boss_console_run_cli_invalid_root_returns_2(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        return {"status": "boss_console_blocked_invalid_input", "warnings": ["governance_root_missing"]}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_console", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-console-run",
+        "--governance-root", "missing",
+        "--output-dir", "output/console",
+    ])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "invalid boss-console-run input" in out

@@ -85,3 +85,22 @@ def test_console_renderer_outputs_required_sections_and_hides_forbidden_terms(tm
         assert text in html
     for term in FORBIDDEN_CONSOLE_TERMS:
         assert term not in html
+
+
+def test_console_runtime_writes_html_and_json(tmp_path: Path):
+    from agent.research_v1.boss_console.console_runtime import run_boss_console
+
+    root = _sample_governance_root(tmp_path)
+    output = tmp_path / "console"
+    result = run_boss_console(root, output, as_of_date="2026-05-01", tickers=["ZETA"])
+    assert result["status"] == "boss_console_ready"
+    assert Path(result["html_path"]).exists()
+    assert Path(result["json_path"]).exists()
+
+
+def test_console_runtime_blocks_invalid_governance_root(tmp_path: Path):
+    from agent.research_v1.boss_console.console_runtime import run_boss_console
+
+    result = run_boss_console(tmp_path / "missing", tmp_path / "console")
+    assert result["status"] == "boss_console_blocked_invalid_input"
+    assert "governance_root_missing" in result["warnings"]

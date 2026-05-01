@@ -24,6 +24,7 @@ from agent.research_v1.research_context_pack import run_research_context_pack
 from agent.research_v1.research_context_prompt_pack import run_research_context_prompt_pack
 from agent.research_v1.boss_preview_runner import run_boss_preview
 from agent.research_v1.boss_pdf_brief_renderer import run_boss_pdf_brief
+from agent.research_v1.boss_console.console_runtime import run_boss_console
 from agent.research_v1.market_regime_context import run_market_regime_context
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
@@ -906,6 +907,38 @@ def _cmd_boss_pdf_brief_run(
     return 0
 
 
+def _cmd_boss_console_run(
+    paths: HermesPaths,
+    governance_root: str,
+    output_dir: str,
+    as_of_date: str | None,
+    tickers: str | None,
+) -> int:
+    root = Path(governance_root).expanduser()
+    if not root.is_absolute():
+        root = paths.app_root / root
+    out = Path(output_dir).expanduser()
+    if not out.is_absolute():
+        out = paths.app_root / out
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()] if tickers else None
+    result = run_boss_console(
+        governance_root=root.resolve(),
+        output_dir=out.resolve(),
+        as_of_date=as_of_date,
+        tickers=ticker_list,
+    )
+    if result.get("status") == "boss_console_blocked_invalid_input":
+        print(f"invalid boss-console-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Boss console status: {result['status']}")
+    print(f"Reports: {result.get('report_count', 0)}")
+    print(f"HTML: {result.get('html_path', '')}")
+    print(f"JSON: {result.get('json_path', '')}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -1108,6 +1141,12 @@ def build_parser() -> argparse.ArgumentParser:
     pdf_brief_parser.add_argument("--max-pages", type=int, default=3)
     pdf_brief_parser.add_argument("--no-pdf", action="store_true")
 
+    boss_console_parser = subparsers.add_parser("boss-console-run", help="Render the local boss web console from governance artifacts.")
+    boss_console_parser.add_argument("--governance-root", default="output/governance")
+    boss_console_parser.add_argument("--output-dir", default="output/console")
+    boss_console_parser.add_argument("--as-of-date", default=None)
+    boss_console_parser.add_argument("--tickers", default=None)
+
     return parser
 
 
@@ -1270,6 +1309,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_pages=args.max_pages,
             no_pdf=args.no_pdf,
         )
+    if args.command == "boss-console-run":
+        return _cmd_boss_console_run(paths, args.governance_root, args.output_dir, args.as_of_date, args.tickers)
 
     parser.print_help()
     return 1
