@@ -760,6 +760,31 @@ mutate recommendations.
   --output-root output/governance
 ```
 
+### P53 Boss One-Command Console
+
+P53 is the boss-facing one-command entrypoint. The operator supplies tickers;
+Hermes runs the preview, visual assets, PDF briefs, and static console, then
+prints the console path and per-ticker PDF paths.
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli boss-one-command-run \
+  --tickers ZETA,NVDA,AMZN \
+  --as-of-date 2026-05-01
+```
+
+Offline dry run:
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli boss-one-command-run \
+  --tickers ZETA,NVDA \
+  --as-of-date 2026-05-01 \
+  --no-live \
+  --no-pdf
+```
+
+P53 does not recommend trades, submit orders, unlock trading, query positions,
+run research, call `final_judge`, or mutate recommendations.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:

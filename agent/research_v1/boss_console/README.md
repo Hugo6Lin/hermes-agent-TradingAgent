@@ -28,3 +28,9 @@ When P52 artifacts exist at `p52_market_visual_snapshot.json` and
 heatmap instead of the placeholders. P51 does not call the P52 runtime;
 it only reads existing artifacts. OpenD must be running and logged in
 for live P52 visualization.
+
+## P53 Integration
+
+P53 (`boss_one_command.py`) orchestrates P49 → P52 → P50 → P51 in a single
+command and writes the console under `output/boss/YYYY-MM-DD/`. The boss
+console HTML is the primary entrypoint printed by the CLI.

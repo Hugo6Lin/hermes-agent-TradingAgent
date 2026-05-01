@@ -161,6 +161,15 @@ is enabled, writes `p52_market_visual_snapshot.json` and SVG assets, and lets P5
 display those assets when present. OpenD must be running and logged in for live
 visualization. P52 does not trade, call `final_judge`, or mutate recommendations.
 
+#### P53 Boss One-Command Console
+
+`boss_one_command.py` is the single-command boss entrypoint. The operator supplies
+tickers; P53 orchestrates P49 preview, P52 visuals, P50 PDF briefs, and P51
+console, then prints the console path and per-ticker PDF paths. It writes a
+`p53_boss_one_command_summary.json/.md` manifest. P53 does not trade, call
+`final_judge`, or mutate recommendations. Use `--no-live --no-pdf` for a safe
+offline dry run.
+
 - how fundamentals quality should be scored
 - how to distinguish insufficient coverage from true `No Trade`
 - how to route analyst roles to stronger or lighter models appropriately
