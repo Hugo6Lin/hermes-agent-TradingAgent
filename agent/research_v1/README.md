@@ -133,8 +133,42 @@ context rather than hidden.
 
 `research_context_prompt_pack.py` reads the latest P47 context pack from DB or artifact, maps ticker context to analyst roles, and writes role-specific prompt-context previews plus a dry-run injection manifest. The flow is one-way: P48 does not call analysts, LLMs, `HermesResearchApp.run()`, `SubagentExecutor`, `final_judge`, P36-P47 runtimes, market-data providers, or broker/order APIs. It does not mutate `SubagentTask.required_context` or inject context into live prompts.
 
+#### P49 Boss Preview Runner
+
+`boss_preview_runner.py` is a one-command preview orchestrator where the boss only supplies tickers. It normalizes input, attempts live Futu readiness by default, generates valid preview sample inputs when real data is absent, runs safe P37-P48 preview phases, and writes a boss-readable preview report. The flow is one-way: P49 does not call `HermesResearchApp.run()`, `final_judge`, `SubagentExecutor`, LLMs, broker/order APIs, model training, scheduling, or notifications.
+
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:
+
+#### P50 Boss PDF Brief Renderer
+
+`boss_pdf_brief_renderer.py` is a presentation-only layer over P49 artifacts.
+It reads existing JSON files, reduces them into boss-facing categories, renders
+deterministic HTML, and optionally exports PDF. It does not invoke P37-P49
+runtimes or change research decisions.
+
+#### P51 Boss Web Console
+
+`boss_console/` renders a static local WebUI from P49/P50 artifacts. It is a
+presentation and navigation layer only. P51 leaves chart and heatmap slots for
+P52 Futu visualization work.
+
+#### P52 Futu Visualization Assets
+
+`market_visual_assets.py` renders read-only K-line SVGs and a watchlist heatmap
+from Futu quote data. It uses quote-only `FutuQuoteClient` calls when live mode
+is enabled, writes `p52_market_visual_snapshot.json` and SVG assets, and lets P51
+display those assets when present. OpenD must be running and logged in for live
+visualization. P52 does not trade, call `final_judge`, or mutate recommendations.
+
+#### P53 Boss One-Command Console
+
+`boss_one_command.py` is the single-command boss entrypoint. The operator supplies
+tickers; P53 orchestrates P49 preview, P52 visuals, P50 PDF briefs, and P51
+console, then prints the console path and per-ticker PDF paths. It writes a
+`p53_boss_one_command_summary.json/.md` manifest. P53 does not trade, call
+`final_judge`, or mutate recommendations. Use `--no-live --no-pdf` for a safe
+offline dry run.
 
 - how fundamentals quality should be scored
 - how to distinguish insufficient coverage from true `No Trade`

@@ -22,7 +22,12 @@ from agent.research_v1.evidence_refresh_planner import run_evidence_refresh_plan
 from agent.research_v1.market_data_readiness import run_market_data_readiness
 from agent.research_v1.research_context_pack import run_research_context_pack
 from agent.research_v1.research_context_prompt_pack import run_research_context_prompt_pack
+from agent.research_v1.boss_preview_runner import run_boss_preview
+from agent.research_v1.boss_pdf_brief_renderer import run_boss_pdf_brief
+from agent.research_v1.boss_console.console_runtime import run_boss_console
+from agent.research_v1.boss_one_command import run_boss_one_command
 from agent.research_v1.market_regime_context import run_market_regime_context
+from agent.research_v1.market_visual_assets import run_market_visual_assets
 from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
 from agent.research_v1.report_pdf_legacy import export_batch_pdf
@@ -809,6 +814,220 @@ def _cmd_research_context_prompt_pack_run(
     return 0
 
 
+def _cmd_boss_preview_run(
+    paths: HermesPaths,
+    tickers: str,
+    as_of_date: str | None,
+    output_root: str,
+    governance_root: str,
+    live: bool,
+    max_candidates: int,
+) -> int:
+    from datetime import date as _date
+
+    effective_date = as_of_date or _date.today().isoformat()
+    try:
+        _date.fromisoformat(effective_date)
+    except (ValueError, TypeError):
+        print(f"invalid boss-preview-run input: invalid date format '{effective_date}'")
+        return 2
+    if max_candidates <= 0:
+        print("invalid boss-preview-run input: max-candidates must be positive")
+        return 2
+
+    ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
+    if not ticker_list:
+        print("invalid boss-preview-run input: tickers required")
+        return 2
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+
+    database = _ensure_database(paths)
+    result = run_boss_preview(
+        db=database,
+        tickers=ticker_list,
+        as_of_date=effective_date,
+        output_root=output_path.resolve(),
+        governance_root=governance_path.resolve(),
+        live=live,
+        max_candidates=max_candidates,
+    )
+    if result.get("status") == "boss_preview_blocked_invalid_input":
+        print(f"invalid boss-preview-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Boss preview status: {result['status']}")
+    print(f"Preview id: {result['preview_id']}")
+    print(f"Tickers: {', '.join(result['tickers'])}")
+    print(f"Top candidates: {', '.join(result.get('top_candidates', [])) or 'none'}")
+    for path in result.get("artifact_paths", []):
+        if str(path).endswith("boss_preview.md"):
+            print(f"Boss report: {path}")
+    return 0
+
+
+def _cmd_boss_pdf_brief_run(
+    paths: HermesPaths,
+    preview_dir: str,
+    ticker: str,
+    output_dir: str | None,
+    title: str | None,
+    max_pages: int,
+    no_pdf: bool,
+) -> int:
+    preview_path = Path(preview_dir).expanduser()
+    if not preview_path.is_absolute():
+        preview_path = paths.app_root / preview_path
+    out_path = None
+    if output_dir:
+        out_path = Path(output_dir).expanduser()
+        if not out_path.is_absolute():
+            out_path = paths.app_root / out_path
+    result = run_boss_pdf_brief(
+        preview_dir=preview_path.resolve(),
+        ticker=ticker,
+        output_dir=out_path.resolve() if out_path is not None else None,
+        title=title,
+        max_pages=max_pages,
+        render_pdf=not no_pdf,
+    )
+    if result.get("status") == "boss_pdf_brief_blocked_invalid_input":
+        print(f"invalid boss-pdf-brief-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Boss PDF brief status: {result['status']}")
+    print(f"Ticker: {result.get('ticker', ticker)}")
+    print(f"HTML: {result.get('html_path', '')}")
+    print(f"PDF: {result.get('pdf_path', '') or 'not generated'}")
+    print(f"Manifest: {result.get('manifest_path', '')}")
+    print(f"Verdict: {result.get('verdict', '')}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
+def _cmd_boss_console_run(
+    paths: HermesPaths,
+    governance_root: str,
+    output_dir: str,
+    as_of_date: str | None,
+    tickers: str | None,
+) -> int:
+    root = Path(governance_root).expanduser()
+    if not root.is_absolute():
+        root = paths.app_root / root
+    out = Path(output_dir).expanduser()
+    if not out.is_absolute():
+        out = paths.app_root / out
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()] if tickers else None
+    result = run_boss_console(
+        governance_root=root.resolve(),
+        output_dir=out.resolve(),
+        as_of_date=as_of_date,
+        tickers=ticker_list,
+    )
+    if result.get("status") == "boss_console_blocked_invalid_input":
+        print(f"invalid boss-console-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Boss console status: {result['status']}")
+    print(f"Reports: {result.get('report_count', 0)}")
+    print(f"HTML: {result.get('html_path', '')}")
+    print(f"JSON: {result.get('json_path', '')}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
+def _cmd_market_visual_run(
+    paths: HermesPaths,
+    tickers: str,
+    as_of_date: str,
+    output_root: str,
+    history_days: int,
+    heatmap_metric: str,
+    live: bool,
+    host: str,
+    port: int,
+) -> int:
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    db = _ensure_database(paths)
+    result = run_market_visual_assets(
+        tickers=ticker_list,
+        as_of_date=as_of_date,
+        output_root=output_path.resolve(),
+        history_days=history_days,
+        heatmap_metric=heatmap_metric,
+        live=live,
+        host=host,
+        port=port,
+        db=db,
+    )
+    if result.get("status") == "blocked_invalid_input":
+        print(f"invalid market-visual-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Market visual status: {result['status']}")
+    print(f"Output dir: {result.get('output_dir', '')}")
+    for path in result.get("artifact_paths", []):
+        print(f"Artifact: {path}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
+def _cmd_boss_one_command_run(
+    paths: HermesPaths,
+    tickers: str,
+    as_of_date: str,
+    output_root: str,
+    governance_root: str,
+    run_id: str | None,
+    live: bool,
+    render_pdf: bool,
+    history_days: int,
+    max_candidates: int,
+    host: str,
+    port: int,
+) -> int:
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+    governance_path = Path(governance_root).expanduser()
+    if not governance_path.is_absolute():
+        governance_path = paths.app_root / governance_path
+    result = run_boss_one_command(
+        db=_ensure_database(paths),
+        tickers=ticker_list,
+        as_of_date=as_of_date,
+        output_root=output_path.resolve(),
+        governance_root=governance_path.resolve(),
+        run_id=run_id,
+        live=live,
+        render_pdf=render_pdf,
+        history_days=history_days,
+        max_candidates=max_candidates,
+        host=host,
+        port=port,
+    )
+    if result.get("status") == "boss_one_command_blocked_invalid_input":
+        print(f"invalid boss-one-command-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+    print(f"Boss one-command status: {result['status']}")
+    print(f"Boss console: {result.get('console', {}).get('html_path', '')}")
+    for brief in result.get("briefs", []):
+        print(f"{brief.get('ticker', '')} PDF: {brief.get('pdf_path') or 'not generated'}")
+    print(f"Summary: {result.get('summary_json_path', '')}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -994,6 +1213,55 @@ def build_parser() -> argparse.ArgumentParser:
     prompt_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
     prompt_parser.add_argument("--output-root", default="output/governance", help="Output root for prompt pack artifacts.")
 
+    preview_parser = subparsers.add_parser("boss-preview-run", help="Run one-command boss preview from tickers.")
+    preview_parser.add_argument("--tickers", required=True, help="Comma-separated ticker symbols.")
+    preview_parser.add_argument("--as-of-date", default=None, help="Preview date YYYY-MM-DD; default today.")
+    preview_parser.add_argument("--output-root", default="output/governance", help="Governance output root.")
+    preview_parser.add_argument("--governance-root", default="output/governance", help="Governance artifact root.")
+    preview_parser.add_argument("--live", dest="live", action="store_true", default=True, help="Enable live Futu readiness by default.")
+    preview_parser.add_argument("--no-live", dest="live", action="store_false", help="Disable live Futu calls.")
+    preview_parser.add_argument("--max-candidates", default=8, type=int, help="Maximum preview candidates.")
+
+    pdf_brief_parser = subparsers.add_parser("boss-pdf-brief-run", help="Render a boss-facing PDF brief from a P49 preview directory.")
+    pdf_brief_parser.add_argument("--preview-dir", required=True)
+    pdf_brief_parser.add_argument("--ticker", required=True)
+    pdf_brief_parser.add_argument("--output-dir", default=None)
+    pdf_brief_parser.add_argument("--title", default=None)
+    pdf_brief_parser.add_argument("--max-pages", type=int, default=3)
+    pdf_brief_parser.add_argument("--no-pdf", action="store_true")
+
+    boss_console_parser = subparsers.add_parser("boss-console-run", help="Render the local boss web console from governance artifacts.")
+    boss_console_parser.add_argument("--governance-root", default="output/governance")
+    boss_console_parser.add_argument("--output-dir", default="output/console")
+    boss_console_parser.add_argument("--as-of-date", default=None)
+    boss_console_parser.add_argument("--tickers", default=None)
+
+    visual_parser = subparsers.add_parser("market-visual-run", help="Render read-only Futu market visualization assets.")
+    visual_parser.add_argument("--tickers", required=True)
+    visual_parser.add_argument("--as-of-date", required=True)
+    visual_parser.add_argument("--output-root", default="output/governance")
+    visual_parser.add_argument("--history-days", type=int, default=120)
+    visual_parser.add_argument("--heatmap-metric", default="return_20d", choices=["return_1d", "return_5d", "return_20d"])
+    visual_parser.add_argument("--live", dest="live", action="store_true", default=True)
+    visual_parser.add_argument("--no-live", dest="live", action="store_false")
+    visual_parser.add_argument("--host", default="127.0.0.1")
+    visual_parser.add_argument("--port", type=int, default=11111)
+
+    one_parser = subparsers.add_parser("boss-one-command-run", help="Run preview, visuals, PDF briefs, and console from tickers.")
+    one_parser.add_argument("--tickers", required=True)
+    one_parser.add_argument("--as-of-date", required=True)
+    one_parser.add_argument("--output-root", default="output/boss")
+    one_parser.add_argument("--governance-root", default="output/governance")
+    one_parser.add_argument("--run-id", default=None)
+    one_parser.add_argument("--history-days", type=int, default=120)
+    one_parser.add_argument("--max-candidates", type=int, default=8)
+    one_parser.add_argument("--live", dest="live", action="store_true", default=True)
+    one_parser.add_argument("--no-live", dest="live", action="store_false")
+    one_parser.add_argument("--no-pdf", dest="render_pdf", action="store_false")
+    one_parser.set_defaults(render_pdf=True)
+    one_parser.add_argument("--host", default="127.0.0.1")
+    one_parser.add_argument("--port", type=int, default=11111)
+
     return parser
 
 
@@ -1135,6 +1403,55 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_block_chars=args.max_block_chars,
             governance_root=args.governance_root,
             output_root=args.output_root,
+        )
+    if args.command == "boss-preview-run":
+        return _cmd_boss_preview_run(
+            paths,
+            tickers=args.tickers,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+            governance_root=args.governance_root,
+            live=args.live,
+            max_candidates=args.max_candidates,
+        )
+    if args.command == "boss-pdf-brief-run":
+        return _cmd_boss_pdf_brief_run(
+            paths,
+            preview_dir=args.preview_dir,
+            ticker=args.ticker,
+            output_dir=args.output_dir,
+            title=args.title,
+            max_pages=args.max_pages,
+            no_pdf=args.no_pdf,
+        )
+    if args.command == "boss-console-run":
+        return _cmd_boss_console_run(paths, args.governance_root, args.output_dir, args.as_of_date, args.tickers)
+    if args.command == "market-visual-run":
+        return _cmd_market_visual_run(
+            paths,
+            tickers=args.tickers,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+            history_days=args.history_days,
+            heatmap_metric=args.heatmap_metric,
+            live=args.live,
+            host=args.host,
+            port=args.port,
+        )
+    if args.command == "boss-one-command-run":
+        return _cmd_boss_one_command_run(
+            paths,
+            tickers=args.tickers,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+            governance_root=args.governance_root,
+            run_id=args.run_id,
+            live=args.live,
+            render_pdf=args.render_pdf,
+            history_days=args.history_days,
+            max_candidates=args.max_candidates,
+            host=args.host,
+            port=args.port,
         )
 
     parser.print_help()

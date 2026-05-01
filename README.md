@@ -684,6 +684,107 @@ P48 converts the latest P47 research context pack into role-specific prompt-cont
 
 It writes `p48_research_context_prompt_pack.json` and `.md` under `output/governance/YYYY-MM-DD/`. P48 is dry-run only: it does not call analysts, LLMs, `HermesResearchApp.run()`, `final_judge`, providers, or broker/order APIs, and it does not mutate `SubagentTask.required_context`.
 
+### P49 Boss Preview Runner
+
+P49 is the one-command boss preview. The boss only supplies tickers:
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli boss-preview-run \
+  --tickers AMZN,ALAB,NVDA,ORCL,QCOM,SOFI \
+  --output-root output/governance
+```
+
+The runner enables live Futu readiness by default, normalizes date-suffixed output roots, creates valid preview sample inputs when verified fundamentals are unavailable, runs safe P37-P48 preview phases, and writes:
+
+```text
+output/governance/YYYY-MM-DD/boss_preview.md
+output/governance/YYYY-MM-DD/boss_preview.json
+```
+
+The preview is not a trade instruction and does not call `HermesResearchApp.run()`, `final_judge`, broker/order APIs, model training, scheduling, or notifications.
+
+### P50 Boss PDF Brief Renderer
+
+P50 converts an existing P49 preview directory into the accepted boss artifact:
+a concise visual PDF brief plus deterministic HTML and JSON manifest.
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli boss-pdf-brief-run \
+  --preview-dir output/governance/zeta-boss-preview/2026-05-01 \
+  --ticker ZETA
+```
+
+Outputs:
+
+```text
+ZETA_BOSS_BRIEF.html
+ZETA_BOSS_BRIEF.pdf
+ZETA_BOSS_BRIEF.json
+```
+
+P50 is presentation-only. It does not call Futu, run research, call `final_judge`,
+create signals, or place/submit orders.
+
+### P51 Boss Web Console
+
+P51 renders a local, static boss console from existing governance artifacts.
+It is the first WebUI shell for Hermes: ticker input, report center, evidence
+health, ticker workspace, and placeholders for P52 Futu chart/heatmap.
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli boss-console-run \
+  --governance-root output/governance \
+  --output-dir output/console \
+  --tickers ZETA,NVDA,AMZN
+```
+
+P51 does not call Futu directly, run research, call `final_judge`, create
+signals, or expose broker/order controls.
+
+### P52 Futu Visualization Assets
+
+P52 renders read-only market visualization assets for the Boss Console:
+K-line SVGs per ticker plus a watchlist heatmap SVG. It uses quote-only Futu
+OpenD calls through `FutuQuoteClient` when live mode is enabled, writes
+`p52_market_visual_snapshot.json` and SVG assets under `output/governance/YYYY-MM-DD/`,
+and lets P51 display those assets when present.
+
+P52 is not TradingView and is not a trading integration. It does not submit
+orders, unlock trading, query positions, run research, call `final_judge`, or
+mutate recommendations.
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli market-visual-run \
+  --tickers ZETA,NVDA,AMZN \
+  --as-of-date 2026-05-01 \
+  --output-root output/governance
+```
+
+### P53 Boss One-Command Console
+
+P53 is the boss-facing one-command entrypoint. The operator supplies tickers;
+Hermes runs the preview, visual assets, PDF briefs, and static console, then
+prints the console path and per-ticker PDF paths.
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli boss-one-command-run \
+  --tickers ZETA,NVDA,AMZN \
+  --as-of-date 2026-05-01
+```
+
+Offline dry run:
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli boss-one-command-run \
+  --tickers ZETA,NVDA \
+  --as-of-date 2026-05-01 \
+  --no-live \
+  --no-pdf
+```
+
+P53 does not recommend trades, submit orders, unlock trading, query positions,
+run research, call `final_judge`, or mutate recommendations.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:
@@ -846,6 +947,14 @@ HERMES_LIVE_FUTU=1 /opt/homebrew/bin/python3.11 -m pytest \
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
   tests/agent/research_v1/test_research_context_prompt_pack.py \
+  -q
+```
+
+### P49 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_boss_preview_runner.py \
   -q
 ```
 

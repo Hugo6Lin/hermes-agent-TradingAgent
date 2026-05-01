@@ -1207,3 +1207,286 @@ def test_research_context_prompt_pack_cli_passes_params(monkeypatch, tmp_path, c
     assert captured["tickers"] == ["AAPL", "MSFT"]
     assert captured["roles"] == ["fundamentals", "risk"]
     assert captured["max_block_chars"] == 800
+
+
+# --- P49 CLI tests ---
+
+
+def test_boss_preview_run_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+    (tmp_path / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "boss_preview_limited",
+            "preview_id": "p49-2026-05-01-abc",
+            "tickers": ["NVDA", "AMZN"],
+            "top_candidates": ["NVDA"],
+            "warnings": [],
+            "artifact_paths": [str(tmp_path / "output" / "governance" / "2026-05-01" / "boss_preview.md")],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_preview", fake_run)
+    code = main(["--app-root", str(tmp_path), "boss-preview-run", "--tickers", "NVDA,AMZN", "--as-of-date", "2026-05-01"])
+    assert code == 0
+    assert captured["live"] is True
+    assert captured["tickers"] == ["NVDA", "AMZN"]
+    assert "Boss preview status: boss_preview_limited" in capsys.readouterr().out
+
+
+def test_boss_preview_run_cli_supports_no_live(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+    (tmp_path / "data").mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"status": "boss_preview_limited", "preview_id": "p49", "tickers": ["NVDA"], "top_candidates": [], "warnings": [], "artifact_paths": []}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_preview", fake_run)
+    code = main(["--app-root", str(tmp_path), "boss-preview-run", "--tickers", "NVDA", "--as-of-date", "2026-05-01", "--no-live"])
+    assert code == 0
+    assert captured["live"] is False
+
+
+# --- P50 CLI tests ---
+
+
+def test_boss_pdf_brief_run_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    preview_dir = tmp_path / "preview" / "2026-05-01"
+    preview_dir.mkdir(parents=True)
+
+    def fake_run(**kwargs):
+        html = preview_dir / "ZETA_BOSS_BRIEF.html"
+        pdf = preview_dir / "ZETA_BOSS_BRIEF.pdf"
+        manifest = preview_dir / "ZETA_BOSS_BRIEF.json"
+        html.write_text("<html></html>", encoding="utf-8")
+        pdf.write_bytes(b"%PDF-1.4\n")
+        manifest.write_text("{}", encoding="utf-8")
+        return {
+            "status": "boss_pdf_brief_ready",
+            "ticker": kwargs["ticker"],
+            "html_path": str(html),
+            "pdf_path": str(pdf),
+            "manifest_path": str(manifest),
+            "verdict": "Usable preview, not decision-grade yet.",
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_pdf_brief", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-pdf-brief-run",
+        "--preview-dir", str(preview_dir),
+        "--ticker", "ZETA",
+    ])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Boss PDF brief status: boss_pdf_brief_ready" in out
+    assert "PDF:" in out
+
+
+def test_boss_pdf_brief_run_cli_invalid_input_returns_2(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        return {"status": "boss_pdf_brief_blocked_invalid_input", "warnings": ["preview_dir_missing"]}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_pdf_brief", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-pdf-brief-run",
+        "--preview-dir", str(tmp_path / "missing"),
+        "--ticker", "ZETA",
+    ])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "invalid boss-pdf-brief-run input" in out
+
+
+def test_boss_pdf_brief_run_cli_passes_title(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "boss_pdf_brief_ready",
+            "ticker": kwargs["ticker"],
+            "html_path": "",
+            "pdf_path": "",
+            "manifest_path": "",
+            "verdict": "",
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_pdf_brief", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-pdf-brief-run",
+        "--preview-dir", str(tmp_path / "preview"),
+        "--ticker", "ZETA",
+        "--title", "Custom ZETA Report",
+    ])
+    assert code == 0
+    assert captured.get("title") == "Custom ZETA Report"
+
+
+# --- P51 CLI tests ---
+
+
+def test_boss_console_run_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        html = tmp_path / "console" / "boss_console.html"
+        js = tmp_path / "console" / "boss_console.json"
+        html.parent.mkdir(parents=True, exist_ok=True)
+        html.write_text("<html></html>", encoding="utf-8")
+        js.write_text("{}", encoding="utf-8")
+        return {"status": "boss_console_ready", "html_path": str(html), "json_path": str(js), "report_count": 1, "warnings": []}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_console", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-console-run",
+        "--governance-root", "output/governance",
+        "--output-dir", "output/console",
+        "--tickers", "ZETA,NVDA",
+    ])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Boss console status: boss_console_ready" in out
+    assert "HTML:" in out
+
+
+def test_boss_console_run_cli_invalid_root_returns_2(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        return {"status": "boss_console_blocked_invalid_input", "warnings": ["governance_root_missing"]}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_console", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-console-run",
+        "--governance-root", "missing",
+        "--output-dir", "output/console",
+    ])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "invalid boss-console-run input" in out
+
+
+# --- P52 CLI tests ---
+
+
+def test_market_visual_run_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        out = tmp_path / "out" / "2026-05-01"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "p52_market_visual_snapshot.json").write_text("{}", encoding="utf-8")
+        return {
+            "status": "visual_assets_ready",
+            "output_dir": str(out),
+            "artifact_paths": [str(out / "p52_market_visual_snapshot.json")],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_visual_assets", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "market-visual-run",
+        "--tickers", "ZETA,NVDA",
+        "--as-of-date", "2026-05-01",
+        "--output-root", "output/governance",
+        "--no-live",
+    ])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Market visual status: visual_assets_ready" in out
+    assert "p52_market_visual_snapshot.json" in out
+
+
+def test_market_visual_run_cli_invalid_input_returns_2(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        return {"status": "blocked_invalid_input", "warnings": ["invalid_date_format"]}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_visual_assets", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "market-visual-run",
+        "--tickers", "ZETA",
+        "--as-of-date", "bad-date",
+    ])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "invalid market-visual-run input" in out
+
+
+# --- P53 CLI tests ---
+
+
+def test_boss_one_command_run_cli_success(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        out = tmp_path / "boss" / "2026-05-01"
+        out.mkdir(parents=True, exist_ok=True)
+        gov = tmp_path / "gov"
+        gov.mkdir(parents=True, exist_ok=True)
+        console = out / "boss_console.html"
+        summary = out / "p53_boss_one_command_summary.json"
+        pdf = gov / "ZETA_BOSS_BRIEF.pdf"
+        console.write_text("<html></html>", encoding="utf-8")
+        summary.write_text("{}", encoding="utf-8")
+        pdf.write_bytes(b"%PDF-1.4\n")
+        return {
+            "status": "boss_one_command_ready",
+            "console": {"html_path": str(console), "json_path": str(out / "boss_console.json")},
+            "briefs": [{"ticker": "ZETA", "pdf_path": str(pdf), "html_path": "", "status": "boss_pdf_brief_ready"}],
+            "summary_json_path": str(summary),
+            "summary_md_path": str(out / "p53_boss_one_command_summary.md"),
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_one_command", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-one-command-run",
+        "--tickers", "ZETA",
+        "--as-of-date", "2026-05-01",
+        "--no-live",
+    ])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Boss one-command status: boss_one_command_ready" in out
+    assert "Boss console:" in out
+    assert "ZETA PDF:" in out
+
+
+def test_boss_one_command_run_cli_invalid_input_returns_2(monkeypatch, tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    def fake_run(**kwargs):
+        return {"status": "boss_one_command_blocked_invalid_input", "warnings": ["invalid_date_format"]}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_boss_one_command", fake_run)
+    code = main([
+        "--app-root", str(tmp_path),
+        "boss-one-command-run",
+        "--tickers", "ZETA",
+        "--as-of-date", "bad-date",
+    ])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "invalid boss-one-command-run input" in out

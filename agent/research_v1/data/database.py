@@ -3586,3 +3586,85 @@ class ResearchDatabase:
             return result
         finally:
             conn.close()
+
+    # --- P52 Market Visual Asset Report helpers ---
+
+    def initialize_market_visual_asset_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS market_visual_asset_reports (
+                    report_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    as_of_date TEXT NOT NULL,
+                    tickers_key TEXT NOT NULL,
+                    history_days INTEGER NOT NULL,
+                    heatmap_metric TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    report_json TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(as_of_date, tickers_key, history_days, heatmap_metric, source_hash)
+                )"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_market_visual_asset_report(self, report: dict[str, Any]) -> int:
+        self.initialize_market_visual_asset_schema()
+        tickers_key = ",".join(report.get("tickers", []))
+        payload = json.dumps(report, sort_keys=True, default=str)
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT OR IGNORE INTO market_visual_asset_reports
+                   (as_of_date, tickers_key, history_days, heatmap_metric, status, source_hash, report_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    report["as_of_date"],
+                    tickers_key,
+                    int(report["history_days"]),
+                    report["heatmap_metric"],
+                    report["status"],
+                    report["source_hash"],
+                    payload,
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                """SELECT report_id FROM market_visual_asset_reports
+                   WHERE as_of_date = ? AND tickers_key = ? AND history_days = ?
+                     AND heatmap_metric = ? AND source_hash = ?""",
+                (report["as_of_date"], tickers_key, int(report["history_days"]),
+                 report["heatmap_metric"], report["source_hash"]),
+            ).fetchone()
+            return int(row["report_id"])
+        finally:
+            conn.close()
+
+    def list_market_visual_asset_reports_as_of(
+        self, as_of_date: str, tickers: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        self.initialize_market_visual_asset_schema()
+        conn = self._get_connection()
+        try:
+            result = conn.execute(
+                """SELECT * FROM market_visual_asset_reports
+                   WHERE as_of_date <= ?
+                   ORDER BY as_of_date DESC, created_at DESC, report_id ASC""",
+                (as_of_date,),
+            ).fetchall()
+        finally:
+            conn.close()
+        requested = {t.strip().upper() for t in tickers or [] if t.strip()}
+        rows: list[dict[str, Any]] = []
+        for row in result:
+            payload = json.loads(row["report_json"])
+            payload["report_id"] = row["report_id"]
+            payload["created_at"] = row["created_at"]
+            if requested:
+                available = {t.upper() for t in payload.get("tickers", [])}
+                if not available.intersection(requested):
+                    continue
+            rows.append(payload)
+        return rows
