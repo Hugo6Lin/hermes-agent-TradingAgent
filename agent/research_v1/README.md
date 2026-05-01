@@ -170,6 +170,21 @@ console, then prints the console path and per-ticker PDF paths. It writes a
 `final_judge`, or mutate recommendations. Use `--no-live --no-pdf` for a safe
 offline dry run.
 
+#### P55 Boss Cockpit V2.1 UI Integration
+
+P55 applies the Claude Design V2.1 cockpit visual language to the static HTML
+output of P50 (boss PDF brief) and P51 (boss web console). It is a
+presentation-only upgrade: glass top chrome, glass command bar, full-width
+market regime strip, watchlist heatmap card, terminal-like report center,
+chart-first ticker workspace, side-rail evidence health and review queue, and
+boss-readable status badges (Ready / Limited / Stale / Sample / Blocked /
+Missing). The V2.1 brief preview adds a "10-second read" executive strip
+(Verdict · Price context · Trusted evidence · Evidence gaps · Next review
+action) and an always-visible evidence-gaps section. P55 ships as static
+HTML/CSS — no external JS, no CDN, no web-font dependency, PDF-safe system
+fallbacks. P55 does not call providers, run research, invoke `final_judge`,
+expose broker/order/trading controls, or include any imperative trading copy.
+
 - how fundamentals quality should be scored
 - how to distinguish insufficient coverage from true `No Trade`
 - how to route analyst roles to stronger or lighter models appropriately
