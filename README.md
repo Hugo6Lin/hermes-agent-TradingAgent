@@ -725,6 +725,22 @@ ZETA_BOSS_BRIEF.json
 P50 is presentation-only. It does not call Futu, run research, call `final_judge`,
 create signals, or place/submit orders.
 
+### P51 Boss Web Console
+
+P51 renders a local, static boss console from existing governance artifacts.
+It is the first WebUI shell for Hermes: ticker input, report center, evidence
+health, ticker workspace, and placeholders for P52 Futu chart/heatmap.
+
+```bash
+/opt/homebrew/bin/python3.11 -m agent.research_v1.batch_cli boss-console-run \
+  --governance-root output/governance \
+  --output-dir output/console \
+  --tickers ZETA,NVDA,AMZN
+```
+
+P51 does not call Futu directly, run research, call `final_judge`, create
+signals, or expose broker/order controls.
+
 ## Important Files for New Models
 
 If another model is taking over, read these files first, in this order:

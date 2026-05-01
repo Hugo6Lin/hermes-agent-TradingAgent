@@ -147,6 +147,12 @@ It reads existing JSON files, reduces them into boss-facing categories, renders
 deterministic HTML, and optionally exports PDF. It does not invoke P37-P49
 runtimes or change research decisions.
 
+#### P51 Boss Web Console
+
+`boss_console/` renders a static local WebUI from P49/P50 artifacts. It is a
+presentation and navigation layer only. P51 leaves chart and heatmap slots for
+P52 Futu visualization work.
+
 - how fundamentals quality should be scored
 - how to distinguish insufficient coverage from true `No Trade`
 - how to route analyst roles to stronger or lighter models appropriately
