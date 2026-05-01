@@ -32,6 +32,10 @@ This branch has moved beyond the old P20 starting point. It now includes:
 - P33 signal-family edge review
 - P34 boss governance daily brief
 - P35 local governance runtime, CLI entrypoint, and documentation standards closure
+- P36 recommendation outcome tracking
+- P37 market regime context
+- P38 fundamental quality engine
+- P39 candidate pool discovery
 
 ## What Hermes Answers
 
@@ -75,6 +79,7 @@ It does this in four layers:
    - edge review
    - boss governance daily brief
    - local governance runtime and CLI wrapper
+   - recommendation outcome tracking
 
 ## Current Product Status
 
@@ -97,6 +102,7 @@ It does this in four layers:
 | P34 boss governance daily brief | Shipped |
 | P35 local governance runtime and CLI | Shipped |
 | Documentation standards for research module | Shipped |
+| P36 recommendation outcome tracking | Shipped |
 | Governance viewer integration | Deferred |
 | Actual controlled evidence generation | Deferred |
 | Auto-trading | Explicit non-goal |
@@ -125,6 +131,7 @@ flowchart TD
     P --> Q["P35 GovernanceRuntime"]
     M --> Q
     N --> Q
+    Q --> R["P36 RecommendationOutcomeTracking"]
 ```
 
 ## Governance Loop
@@ -138,6 +145,7 @@ P31 DailyGovernanceRun
   -> P33 SignalFamilyEdgeReview
   -> P34 BossGovernanceDailyBrief
   -> P35 GovernanceRuntime / governance-run CLI
+  -> P36 RecommendationOutcomeTracking / outcome-run CLI
 ```
 
 ### P31: Readiness Dossiers
@@ -239,6 +247,34 @@ P35 is still governance-only. It does not run real evidence generation jobs,
 train models, schedule work, send notifications, open a viewer, place trades, or
 approve production adoption.
 
+### P36: Recommendation Outcome Tracking
+
+P36 adds standalone canonical outcome tracking. It reads prior canonical
+recommendations, resolves the boss-facing action from canonical reports,
+evaluates eligible `Buy Stock` and `Buy Call` recommendations against forward
+market data, and writes `p36_recommendation_outcomes.{json,md}` under
+`output/governance/YYYY-MM-DD/`.
+
+P36 is not a broker, scheduler, backtester, model trainer, production approver,
+or P35 runtime extension. It is an append-only audit loop with natural-key
+idempotence over `(signal_id, horizon_days, evaluated_for_date, data_source_hash)`.
+
+Core module:
+
+```text
+agent/research_v1/recommendation_outcomes.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli outcome-run \
+  --as-of-date 2026-04-30 \
+  --output-root output/governance \
+  --limit 100 \
+  --flat-cost-bps 0
+```
+
 ## Hard Boundaries
 
 Hermes must not:
@@ -336,6 +372,28 @@ python -m agent.research_v1.batch_cli governance-run \
 The CLI default output root is resolved under `--app-root` when a relative path
 is provided.
 
+### P36 Recommendation Outcome Tracking
+
+Core module:
+
+```text
+agent/research_v1/recommendation_outcomes.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli outcome-run \
+  --as-of-date 2026-04-30 \
+  --output-root output/governance \
+  --limit 100 \
+  --flat-cost-bps 0
+```
+
+The `outcome-run` command reads canonical signals, resolves actions from
+canonical reports, evaluates eligible recommendations, and writes P36 artifacts.
+It does not place trades, train models, or approve production adoption.
+
 Minimum config shape:
 
 ```json
@@ -361,6 +419,139 @@ Minimum config shape:
 Invalid JSON or structurally invalid config returns `blocked_invalid_config`.
 Write failures return `governance_degraded`. Requests with
 `allow_actual_execution=true` remain blocked by P32-B dry-run rules.
+
+### P37 Market Regime Context
+
+Core module:
+
+```text
+agent/research_v1/market_regime_context.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli market-regime-run \
+  --as-of-date 2026-04-30 \
+  --lookback-days 90 \
+  --output-root output/governance
+```
+
+P37 adds standalone daily market-regime context. It computes index trend,
+volatility, breadth, risk appetite, and sector rotation from market proxy
+histories, persists append-only `market_regime_snapshots`, and writes
+`p37_market_regime_snapshot.{json,md}` under `output/governance/YYYY-MM-DD/`.
+
+P37 is context evidence only. It does not change ticker recommendations,
+call `final_judge`, train models, schedule jobs, send notifications, place
+trades, or approve production adoption.
+
+### P38 Fundamental Quality Engine
+
+Core module:
+
+```text
+agent/research_v1/fundamental_quality.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli fundamental-quality-run \
+  --input /path/to/fundamentals.json \
+  --as-of-date 2026-04-30 \
+  --output-root output/governance
+```
+
+P38 adds standalone deterministic fundamental-quality scoring from
+point-in-time financial rows. It computes profitability, growth quality,
+cash conversion, balance-sheet strength, dilution, and stability dimensions,
+persists append-only `fundamental_quality_reports`, and writes
+`p38_fundamental_quality.{json,md}` under `output/governance/YYYY-MM-DD/`.
+
+P38 is evidence only. It does not change ticker recommendations, call
+`final_judge`, alter `RoleWeightConfig`, inject into `JudgeInputPacket`,
+train models, schedule jobs, send notifications, place trades, or approve
+production adoption.
+
+### P39 Candidate Pool Engine
+
+Core module:
+
+```text
+agent/research_v1/candidate_pool.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli candidate-pool-run \
+  --input /path/to/universe.json \
+  --as-of-date 2026-04-30 \
+  --output-root output/governance \
+  --max-candidates 20
+```
+
+P39 screens a point-in-time ticker universe and ranks research candidates
+using deterministic momentum, quality (P38), regime (P37), liquidity, risk,
+and track-record component scores. It joins read-only P36/P37/P38 evidence
+when available, assigns candidate categories, and writes
+`p39_candidate_pool.{json,md}` under `output/governance/YYYY-MM-DD/`.
+
+P39 is candidate-discovery evidence only. It does not call
+`HermesResearchApp.run()`, `final_judge`, create `CanonicalSignal` or
+`CanonicalReport`, place orders, train models, schedule jobs, or mutate
+P36/P37/P38 evidence.
+
+### P40 Research Memory Pack
+
+```
+agent/research_v1/research_memory_pack.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli memory-pack-run \
+  --tickers AAPL,MSFT \
+  --as-of-date 2026-04-30 \
+  --lookback-days 180 \
+  --output-root output/governance
+```
+
+P40 builds deterministic ticker-level memory packs from prior Hermes
+research signals, reports, outcomes, candidate history, quality (P38),
+regime (P37), watchlist, and validation context. It writes
+`p40_research_memory_pack.{json,md}` under `output/governance/YYYY-MM-DD/`.
+
+P40 is research-memory evidence only. It does not call
+`HermesResearchApp.run()`, `final_judge`, create `CanonicalSignal` or
+`CanonicalReport`, place orders, train models, schedule jobs, or mutate
+P35-P39 evidence.
+
+### P41 Decision Journal Guardrails
+
+```
+agent/research_v1/decision_journal_guardrails.py
+```
+
+CLI:
+
+```bash
+python -m agent.research_v1.batch_cli decision-journal-run \
+  --input /path/to/decision_journal.json \
+  --as-of-date 2026-04-30 \
+  --output-root output/governance
+```
+
+P41 records boss decision context and emits deterministic behavioral
+guardrail flags (urgency, concentration, drawdown, stale thesis, missing
+evidence). It writes `p41_decision_journal.{json,md}` under
+`output/governance/YYYY-MM-DD/`.
+
+P41 is behavioral guardrail evidence only. It does not block action,
+call `HermesResearchApp.run()`, `final_judge`, place orders, or alter
+recommendations.
 
 ## Important Files for New Models
 
@@ -391,10 +582,12 @@ If another model is taking over, read these files first, in this order:
 12. `agent/research_v1/boss_governance_brief.py`
     - P34 boss daily brief
 13. `agent/research_v1/batch_cli.py`
-    - local CLI, including `governance-run`
-14. `docs/superpowers/specs/2026-04-30-hermes-p35-governance-runtime-design.md`
+    - local CLI, including `governance-run` and `outcome-run`
+14. `agent/research_v1/recommendation_outcomes.py`
+    - P36 recommendation outcome tracking
+15. `docs/superpowers/specs/2026-04-30-hermes-p35-governance-runtime-design.md`
     - P35 design
-15. `docs/superpowers/plans/2026-04-30-p35-governance-runtime.md`
+16. `docs/superpowers/plans/2026-04-30-p35-governance-runtime.md`
     - P35 implementation plan and verification commands
 
 For regression behavior, read the matching tests in `tests/agent/research_v1/`,
@@ -413,6 +606,54 @@ Use Python 3.11:
 /opt/homebrew/bin/python3.11
 ```
 
+### P36 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_recommendation_outcomes.py \
+  -q
+```
+
+### P37 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_market_regime_context.py \
+  -q
+```
+
+### P38 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_fundamental_quality.py \
+  -q
+```
+
+### P39 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_candidate_pool.py \
+  -q
+```
+
+### P40 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_research_memory_pack.py \
+  -q
+```
+
+### P41 Focused
+
+```bash
+/opt/homebrew/bin/python3.11 -m pytest \
+  tests/agent/research_v1/test_decision_journal_guardrails.py \
+  -q
+```
+
 ### P35 Focused
 
 ```bash
@@ -421,12 +662,6 @@ Use Python 3.11:
   tests/agent/research_v1/test_batch_cli.py \
   tests/agent/research_v1/test_doc_standards.py \
   -q
-```
-
-Recent result:
-
-```text
-58 passed
 ```
 
 ### P31-P35 Governance Loop
@@ -450,7 +685,7 @@ Recent result:
 60 passed
 ```
 
-### Full P20-P35 Governance Chain
+### Full P20-P41 Governance Chain
 
 ```bash
 /opt/homebrew/bin/python3.11 -m pytest \
@@ -483,20 +718,19 @@ Recent result:
   tests/agent/research_v1/test_signal_family_edge_review.py \
   tests/agent/research_v1/test_boss_governance_brief.py \
   tests/agent/research_v1/test_governance_runtime.py \
+  tests/agent/research_v1/test_recommendation_outcomes.py \
+  tests/agent/research_v1/test_market_regime_context.py \
+  tests/agent/research_v1/test_fundamental_quality.py \
+  tests/agent/research_v1/test_candidate_pool.py \
+  tests/agent/research_v1/test_research_memory_pack.py \
+  tests/agent/research_v1/test_decision_journal_guardrails.py \
   -q
-```
-
-Recent result:
-
-```text
-550 passed
 ```
 
 ## Known Environment-Specific Test Gap
 
 `test_app_end_to_end_init_ingest_and_export_pdf` can fail on hosts that do not
-have Microsoft Edge installed. This is unrelated to P35 governance runtime
-behavior.
+have Microsoft Edge installed. This is unrelated to P35 or P36 behavior.
 
 ## Useful Paths
 
@@ -519,6 +753,8 @@ behavior.
 - [P32-P34 governance evidence loop plan](docs/superpowers/plans/2026-04-29-p32-p34-governance-evidence-loop.md)
 - [P35 governance runtime spec](docs/superpowers/specs/2026-04-30-hermes-p35-governance-runtime-design.md)
 - [P35 governance runtime plan](docs/superpowers/plans/2026-04-30-p35-governance-runtime.md)
+- [P36 recommendation outcome tracking spec](docs/superpowers/specs/2026-04-30-hermes-p36-recommendation-outcome-tracking-spec.md)
+- [P36 recommendation outcome tracking plan](docs/superpowers/plans/2026-04-30-p36-recommendation-outcome-tracking.md)
 - [P29 production adoption review spec](docs/superpowers/specs/2026-04-26-hermes-phase29-production-adoption-review-pack-spec.md)
 - [P30 advanced model pack spec](docs/superpowers/specs/2026-04-26-hermes-phase30-advanced-model-pack-spec.md)
 
@@ -531,9 +767,11 @@ If you are a model, agent, or operator newly entering this repository:
 3. Read `agent/research_v1/AGENT.md`.
 4. Treat `HermesResearchApp.run()` as the research truth.
 5. Treat `generate_image_report()` as downstream boss-report delivery.
-6. Treat P31-P35 governance outputs as advisory evidence, not production approval.
+6. Treat P31-P36 governance outputs as advisory evidence, not production approval.
 7. Treat P35 `governance-run` as a local runtime wrapper, not as a scheduler or
    execution engine.
-8. Do not add auto-trading, real evidence generation, model training, production
+8. Treat P36 `outcome-run` as append-only outcome tracking, not as a backtester,
+   model trainer, or production approval signal.
+9. Do not add auto-trading, real evidence generation, model training, production
    promotion, scheduling, notifications, or broker wiring without a new approved
    spec.

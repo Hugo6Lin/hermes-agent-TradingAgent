@@ -48,9 +48,58 @@ judgment, canonical signal/report objects, and optional image-report generation.
 
 The governance flow starts from P20-P30 evidence, then runs P31 readiness,
 P32 artifact registry and dry-run generation validation, P33 signal-family edge
-review, P34 boss governance brief, and P35 local runtime orchestration. This
-flow writes append-only governance artifacts under `output/governance/YYYY-MM-DD/`
-and does not create broker orders or production approval.
+review, P34 boss governance brief, P35 local runtime orchestration, and P36
+recommendation outcome tracking. This flow writes append-only governance
+artifacts under `output/governance/YYYY-MM-DD/` and does not create broker
+orders or production approval.
+
+#### P36 Outcome Tracking
+
+`recommendation_outcomes.py` consumes canonical signals and canonical reports
+after research has completed. It persists forward outcome rows in
+`canonical_recommendation_outcomes`, then emits standalone P36 artifacts under
+`output/governance/YYYY-MM-DD/`. The flow is one-way and read-only with respect
+to research decisions: outcomes do not alter `final_judge`, `RoleWeightConfig`,
+P33 edge review, P35 runtime, or production configuration in P36.
+
+#### P37 Market Regime Context
+
+`market_regime_context.py` consumes market proxy histories and emits a
+standalone market-regime snapshot. The flow is one-way: market context is
+persisted and written to artifacts, but it does not alter `final_judge`,
+`RoleWeightConfig`, `JudgeInputPacket`, P35 governance runtime, P36 outcome
+tracking, or production configuration in P37.
+
+#### P38 Fundamental Quality Engine
+
+`fundamental_quality.py` consumes point-in-time financial rows and emits
+standalone fundamental-quality reports. The flow is one-way: quality reports
+are persisted and written to artifacts, but P38 does not alter
+`_extract_thesis_inputs()`, `ThesisEngine`, `final_judge`, `RoleWeightConfig`,
+`JudgeInputPacket`, P35 governance runtime, P36 outcome tracking, P37
+market-regime context, or production configuration.
+
+#### P39 Candidate Pool Engine
+
+`candidate_pool.py` consumes a point-in-time ticker universe plus read-only
+P36/P37/P38 evidence. It emits a candidate pool for human review. The flow
+is one-way: candidate-pool artifacts do not call `HermesResearchApp.run()`,
+`final_judge`, `_extract_thesis_inputs()`, or broker/order APIs.
+
+#### P40 Research Memory Pack
+
+`research_memory_pack.py` reads prior Hermes artifacts and DB rows for a
+ticker and emits a deterministic memory pack. The flow is one-way: memory
+packs do not call `HermesResearchApp.run()`, `final_judge`,
+`JudgeInputPacket`, or broker/order APIs.
+
+#### P41 Decision Journal Guardrails
+
+`decision_journal_guardrails.py` reads explicit boss decision-journal input
+plus read-only P40 memory packs and emits behavioral guardrail evidence.
+The flow is one-way: decision journal entries do not call
+`HermesResearchApp.run()`, `final_judge`, `JudgeInputPacket`, or
+broker/order APIs.
 
 That means the next core engineering problem is no longer "how to deliver the report",
 but rather:

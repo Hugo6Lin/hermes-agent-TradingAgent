@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import date
 from pathlib import Path
 from typing import Sequence
 
 from agent.research_v1.data.database import ResearchDatabase
 from agent.research_v1.data.futu_opend import FutuQuoteClient
 from agent.research_v1.governance_runtime import GovernanceRuntimeRequest, run_governance_runtime
+from agent.research_v1.fundamental_quality import run_fundamental_quality
+from agent.research_v1.candidate_pool import run_candidate_pool
+from agent.research_v1.research_memory_pack import run_research_memory_pack
+from agent.research_v1.decision_journal_guardrails import run_decision_journal_guardrails
+from agent.research_v1.market_regime_context import run_market_regime_context
+from agent.research_v1.recommendation_outcomes import run_recommendation_outcome_tracking
 from agent.research_v1.paths import HermesPaths
 from agent.research_v1.report_pdf_legacy import export_batch_pdf
 from agent.research_v1.research_batch_service import save_batch_research
@@ -117,6 +124,350 @@ def _cmd_governance_run(
     return 2 if result.status == "blocked_invalid_config" else 0
 
 
+def _cmd_outcome_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    output_root: str,
+    limit: int,
+    flat_cost_bps: float,
+) -> int:
+    if limit < 0 or flat_cost_bps < 0:
+        print("invalid outcome-run input: limit and flat-cost-bps must be non-negative")
+        return 2
+
+    try:
+        evaluated_date = date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid outcome-run input: invalid date format '{as_of_date}'")
+        return 2
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_recommendation_outcome_tracking(
+        db=database,
+        evaluated_for_date=evaluated_date,
+        limit=limit,
+        flat_cost_bps=flat_cost_bps,
+        output_root=output_path.resolve(),
+    )
+    print(f"Outcome tracking status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Outcome rows written: {result['outcome_rows_written']}")
+    print(f"Duplicate rows skipped: {result['duplicate_rows_skipped']}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
+def _cmd_market_regime_run(
+    paths: HermesPaths,
+    as_of_date: str,
+    lookback_days: int,
+    output_root: str,
+) -> int:
+    try:
+        run_date = date.fromisoformat(as_of_date)
+    except (ValueError, TypeError):
+        print(f"invalid market-regime-run input: invalid date format '{as_of_date}'")
+        return 2
+
+    if lookback_days <= 0:
+        print("invalid market-regime-run input: lookback-days must be positive")
+        return 2
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_market_regime_context(
+        db=database,
+        as_of_date=run_date,
+        lookback_days=lookback_days,
+        output_root=output_path.resolve(),
+    )
+    print(f"Market regime status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Regime label: {result['regime_label']}")
+    print(f"Confidence: {result['confidence']}")
+    print(f"Missing symbols: {len(result['missing_symbols'])}")
+    for warning in result.get("warnings", []):
+        print(f"Warning: {warning}")
+    return 0
+
+
+def _cmd_fundamental_quality_run(
+    paths: HermesPaths,
+    input_path: str,
+    as_of_date: str | None,
+    output_root: str,
+) -> int:
+    # Validate date format before proceeding
+    effective_date = as_of_date
+    if effective_date is None:
+        # Will be resolved later from payload; skip CLI-level date check
+        pass
+    else:
+        try:
+            date.fromisoformat(effective_date)
+        except (ValueError, TypeError):
+            print(f"invalid fundamental-quality-run input: invalid date format '{effective_date}'")
+            return 2
+
+    payload_path = Path(input_path).expanduser().resolve()
+    if not payload_path.exists():
+        print(f"invalid fundamental-quality-run input: file not found '{input_path}'")
+        return 2
+
+    try:
+        input_payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, ValueError) as exc:
+        print(f"invalid fundamental-quality-run input: {exc}")
+        return 2
+
+    if not isinstance(input_payload.get("tickers"), list):
+        print("invalid fundamental-quality-run input: missing 'tickers' list")
+        return 2
+
+    # Validate each ticker item is a dict
+    for i, item in enumerate(input_payload["tickers"]):
+        if not isinstance(item, dict):
+            print(f"invalid fundamental-quality-run input: ticker item {i} is not a dict")
+            return 2
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_fundamental_quality(
+        db=database,
+        input_payload=input_payload,
+        as_of_date=as_of_date,
+        output_root=output_path.resolve(),
+    )
+    print(f"Fundamental quality status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Report count: {result['report_count']}")
+    print(f"Blocked count: {result['blocked_count']}")
+    print(f"Warning count: {result['warning_count']}")
+    return 0
+
+
+def _cmd_candidate_pool_run(
+    paths: HermesPaths,
+    input_path: str,
+    as_of_date: str | None,
+    output_root: str,
+    max_candidates: int,
+) -> int:
+    # Validate date format before proceeding
+    if as_of_date is not None:
+        try:
+            date.fromisoformat(as_of_date)
+        except (ValueError, TypeError):
+            print(f"invalid candidate-pool-run input: invalid date format '{as_of_date}'")
+            return 2
+
+    if max_candidates <= 0:
+        print("invalid candidate-pool-run input: max-candidates must be positive")
+        return 2
+
+    payload_path = Path(input_path).expanduser().resolve()
+    if not payload_path.exists():
+        print(f"invalid candidate-pool-run input: file not found '{input_path}'")
+        return 2
+
+    try:
+        input_payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, ValueError) as exc:
+        print(f"invalid candidate-pool-run input: {exc}")
+        return 2
+
+    if not isinstance(input_payload.get("tickers"), list):
+        print("invalid candidate-pool-run input: missing 'tickers' list")
+        return 2
+
+    for i, item in enumerate(input_payload["tickers"]):
+        if not isinstance(item, dict):
+            print(f"invalid candidate-pool-run input: ticker item {i} is not a dict")
+            return 2
+
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_candidate_pool(
+        db=database,
+        input_payload=input_payload,
+        as_of_date=as_of_date,
+        output_root=output_path.resolve(),
+        max_candidates=max_candidates,
+    )
+    print(f"Candidate pool status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Candidate count: {result['candidate_count']}")
+    print(f"Excluded count: {result['excluded_count']}")
+    print(f"Top candidate: {result['top_candidate'] or 'none'}")
+    print(f"Warning count: {result['warning_count']}")
+    return 0
+
+
+def _cmd_memory_pack_run(
+    paths: HermesPaths,
+    tickers: str | None,
+    input_path: str | None,
+    as_of_date: str | None,
+    lookback_days: int,
+    output_root: str,
+    max_items_per_ticker: int,
+) -> int:
+    from datetime import date as _date
+
+    # Load from JSON input if provided
+    input_payload: dict = {}
+    if input_path:
+        payload_path = Path(input_path).expanduser().resolve()
+        if not payload_path.exists():
+            print(f"invalid memory-pack-run input: file not found '{input_path}'")
+            return 2
+        try:
+            input_payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError) as exc:
+            print(f"invalid memory-pack-run input: {exc}")
+            return 2
+
+    # Merge tickers from CLI and JSON
+    ticker_list: list[str] = []
+    if tickers:
+        ticker_list.extend(tickers.split(","))
+    if input_payload.get("tickers"):
+        ticker_list.extend(input_payload["tickers"])
+
+    # Resolve as_of_date
+    effective_date = as_of_date or input_payload.get("as_of_date")
+    if not effective_date:
+        print("invalid memory-pack-run input: --as-of-date is required")
+        return 2
+
+    try:
+        _date.fromisoformat(effective_date)
+    except (ValueError, TypeError):
+        print(f"invalid memory-pack-run input: invalid date format '{effective_date}'")
+        return 2
+
+    # Validate lookback
+    effective_lookback = lookback_days or input_payload.get("lookback_days", 180)
+    if effective_lookback <= 0:
+        print("invalid memory-pack-run input: lookback-days must be positive")
+        return 2
+
+    # Validate max items
+    if max_items_per_ticker <= 0:
+        print("invalid memory-pack-run input: max-items-per-ticker must be positive")
+        return 2
+
+    # Resolve output root
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_research_memory_pack(
+        db=database,
+        tickers=ticker_list,
+        as_of_date=effective_date,
+        lookback_days=effective_lookback,
+        output_root=output_path.resolve(),
+        max_items_per_ticker=max_items_per_ticker,
+    )
+
+    if result.get("status") == "blocked_invalid_input":
+        print(f"invalid memory-pack-run input: {result.get('warnings', ['unknown'])[0]}")
+        return 2
+
+    print(f"Research memory status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Ticker count: {result['ticker_count']}")
+    print(f"Memory available: {result['memory_available']}")
+    print(f"Limited memory: {result['limited_memory']}")
+    print(f"No prior memory: {result['no_prior_memory']}")
+    print(f"Warning count: {result['warning_count']}")
+    return 0
+
+
+def _cmd_decision_journal_run(
+    paths: HermesPaths,
+    input_path: str,
+    as_of_date: str | None,
+    output_root: str,
+) -> int:
+    from datetime import date as _date
+
+    # Validate file exists
+    payload_path = Path(input_path).expanduser().resolve()
+    if not payload_path.exists():
+        print(f"invalid decision-journal-run input: file not found '{input_path}'")
+        return 2
+
+    # Validate JSON
+    try:
+        input_payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, ValueError) as exc:
+        print(f"invalid decision-journal-run input: {exc}")
+        return 2
+
+    # Validate date if provided
+    effective_date = as_of_date or input_payload.get("as_of_date")
+    if effective_date:
+        try:
+            _date.fromisoformat(effective_date)
+        except (ValueError, TypeError):
+            print(f"invalid decision-journal-run input: invalid date format '{effective_date}'")
+            return 2
+
+    # Validate decisions list
+    decisions = input_payload.get("decisions")
+    if not isinstance(decisions, list) or not decisions:
+        print("invalid decision-journal-run input: missing or empty 'decisions' list")
+        return 2
+
+    for i, item in enumerate(decisions):
+        if not isinstance(item, dict):
+            print(f"invalid decision-journal-run input: decision item {i} is not a dict")
+            return 2
+
+    # Resolve output root
+    output_path = Path(output_root).expanduser()
+    if not output_path.is_absolute():
+        output_path = paths.app_root / output_path
+
+    database = _ensure_database(paths)
+    result = run_decision_journal_guardrails(
+        db=database,
+        input_payload=input_payload,
+        as_of_date=effective_date,
+        output_root=output_path.resolve(),
+    )
+
+    if result.get("status") == "blocked_invalid_input":
+        warnings = result.get("warnings", ["unknown"])
+        print(f"invalid decision-journal-run input: {warnings[0]}")
+        return 2
+
+    print(f"Decision journal status: {result['status']}")
+    print(f"Output dir: {result['output_dir']}")
+    print(f"Entry count: {result['entry_count']}")
+    print(f"Manual review count: {result['manual_review_count']}")
+    print(f"Slow down count: {result['slow_down_count']}")
+    print(f"Warning count: {result['warning_count']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hermes-research")
     parser.add_argument(
@@ -162,6 +513,95 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum artifact age before registry marks an artifact stale.",
     )
 
+    outcome_parser = subparsers.add_parser("outcome-run", help="Run recommendation outcome tracking.")
+    outcome_parser.add_argument("--as-of-date", required=True, help="Evaluation as-of date YYYY-MM-DD.")
+    outcome_parser.add_argument(
+        "--output-root",
+        default="output/governance",
+        help="Root directory for outcome artifacts.",
+    )
+    outcome_parser.add_argument(
+        "--limit",
+        default=100,
+        type=int,
+        help="Maximum number of signals to evaluate.",
+    )
+    outcome_parser.add_argument(
+        "--flat-cost-bps",
+        default=0.0,
+        type=float,
+        help="Flat round-trip cost in basis points.",
+    )
+
+    regime_parser = subparsers.add_parser("market-regime-run", help="Run market regime context snapshot.")
+    regime_parser.add_argument("--as-of-date", required=True, help="Snapshot as-of date YYYY-MM-DD.")
+    regime_parser.add_argument(
+        "--lookback-days",
+        default=90,
+        type=int,
+        help="Lookback window in days for proxy history.",
+    )
+    regime_parser.add_argument(
+        "--output-root",
+        default="output/governance",
+        help="Root directory for regime artifacts.",
+    )
+
+    fq_parser = subparsers.add_parser("fundamental-quality-run", help="Run fundamental quality scoring.")
+    fq_parser.add_argument("--input", required=True, help="Path to a JSON fundamentals input file.")
+    fq_parser.add_argument("--as-of-date", default=None, help="Override as-of date YYYY-MM-DD.")
+    fq_parser.add_argument(
+        "--output-root",
+        default="output/governance",
+        help="Root directory for fundamental quality artifacts.",
+    )
+
+    candidate_parser = subparsers.add_parser("candidate-pool-run", help="Run candidate pool discovery.")
+    candidate_parser.add_argument("--input", required=True, help="Path to a JSON universe input file.")
+    candidate_parser.add_argument("--as-of-date", default=None, help="Override as-of date YYYY-MM-DD.")
+    candidate_parser.add_argument(
+        "--output-root",
+        default="output/governance",
+        help="Root directory for candidate pool artifacts.",
+    )
+    candidate_parser.add_argument(
+        "--max-candidates",
+        default=20,
+        type=int,
+        help="Maximum candidates to keep.",
+    )
+
+    memory_parser = subparsers.add_parser("memory-pack-run", help="Run research memory pack for tickers.")
+    memory_parser.add_argument("--tickers", default=None, help="Comma-separated ticker list.")
+    memory_parser.add_argument("--input", default=None, help="Path to a JSON input file.")
+    memory_parser.add_argument("--as-of-date", default=None, help="As-of date YYYY-MM-DD.")
+    memory_parser.add_argument(
+        "--lookback-days",
+        default=180,
+        type=int,
+        help="Lookback window in days.",
+    )
+    memory_parser.add_argument(
+        "--output-root",
+        default="output/governance",
+        help="Root directory for memory pack artifacts.",
+    )
+    memory_parser.add_argument(
+        "--max-items-per-ticker",
+        default=5,
+        type=int,
+        help="Maximum items per ticker section.",
+    )
+
+    journal_parser = subparsers.add_parser("decision-journal-run", help="Run decision journal guardrails.")
+    journal_parser.add_argument("--input", required=True, help="Path to a JSON decision journal input file.")
+    journal_parser.add_argument("--as-of-date", default=None, help="Override as-of date YYYY-MM-DD.")
+    journal_parser.add_argument(
+        "--output-root",
+        default="output/governance",
+        help="Root directory for decision journal artifacts.",
+    )
+
     return parser
 
 
@@ -191,6 +631,53 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_date=args.run_date,
             output_root=args.output_root,
             freshness_policy_days=args.freshness_policy_days,
+        )
+    if args.command == "outcome-run":
+        return _cmd_outcome_run(
+            paths,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+            limit=args.limit,
+            flat_cost_bps=args.flat_cost_bps,
+        )
+    if args.command == "market-regime-run":
+        return _cmd_market_regime_run(
+            paths,
+            as_of_date=args.as_of_date,
+            lookback_days=args.lookback_days,
+            output_root=args.output_root,
+        )
+    if args.command == "fundamental-quality-run":
+        return _cmd_fundamental_quality_run(
+            paths,
+            input_path=args.input,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+        )
+    if args.command == "candidate-pool-run":
+        return _cmd_candidate_pool_run(
+            paths,
+            input_path=args.input,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
+            max_candidates=args.max_candidates,
+        )
+    if args.command == "memory-pack-run":
+        return _cmd_memory_pack_run(
+            paths,
+            tickers=args.tickers,
+            input_path=args.input,
+            as_of_date=args.as_of_date,
+            lookback_days=args.lookback_days,
+            output_root=args.output_root,
+            max_items_per_ticker=args.max_items_per_ticker,
+        )
+    if args.command == "decision-journal-run":
+        return _cmd_decision_journal_run(
+            paths,
+            input_path=args.input,
+            as_of_date=args.as_of_date,
+            output_root=args.output_root,
         )
 
     parser.print_help()

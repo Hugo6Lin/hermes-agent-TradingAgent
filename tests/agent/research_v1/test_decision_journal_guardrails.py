@@ -1,0 +1,254 @@
+"""Tests for P41 decision journal guardrails."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from agent.research_v1.decision_journal_guardrails import (
+    P41_SCHEMA_VERSION,
+    build_decision_journal_entry,
+    compute_decision_journal_source_hash,
+    validate_decision_item,
+)
+
+
+def _decision(**overrides) -> dict:
+    base = {
+        "ticker": "AAPL",
+        "contemplated_action": "research_candidate",
+        "decision_intent": "review_before_action",
+        "stated_reason": "Candidate score is high.",
+        "boss_confidence": 0.82,
+        "urgency": "high",
+        "time_pressure": "same_day",
+        "recent_pnl_state": "drawdown",
+        "position_context": {
+            "current_position_pct": 0.08,
+            "sector_exposure_pct": 0.32,
+            "cash_available_pct": 0.18,
+        },
+        "manual_notes": ["Review concentration first"],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_valid_decision_builds_journal_entry():
+    entry = build_decision_journal_entry(_decision(), "2026-04-30", memory_pack=None)
+
+    assert entry["schema_version"] == P41_SCHEMA_VERSION
+    assert entry["ticker"] == "AAPL"
+    assert entry["contemplated_action"] == "research_candidate"
+    assert entry["severity"] in {"info", "caution", "slow_down", "manual_review"}
+
+
+def test_forbidden_trade_action_is_blocked():
+    errors = validate_decision_item(_decision(contemplated_action="buy"))
+
+    assert "forbidden_contemplated_action" in errors
+
+
+def test_ticker_normalization_uppercases_and_trims():
+    entry = build_decision_journal_entry(_decision(ticker=" aapl "), "2026-04-30", None)
+    assert entry["ticker"] == "AAPL"
+
+
+def test_high_urgency_high_confidence_slow_down():
+    entry = build_decision_journal_entry(_decision(urgency="high", boss_confidence=0.90), "2026-04-30", None)
+    flags = {f["flag_id"] for f in entry["guardrail_flags"]}
+    assert "high_urgency_high_confidence" in flags
+    assert entry["severity"] in {"slow_down", "manual_review"}
+
+
+def test_same_day_time_pressure_emits_flag():
+    entry = build_decision_journal_entry(_decision(time_pressure="same_day", urgency="low", boss_confidence=0.5), "2026-04-30", None)
+    flags = {f["flag_id"] for f in entry["guardrail_flags"]}
+    assert "time_pressure_same_day" in flags
+
+
+def test_drawdown_state_emits_flag():
+    entry = build_decision_journal_entry(_decision(recent_pnl_state="drawdown", urgency="low", boss_confidence=0.5), "2026-04-30", None)
+    flags = {f["flag_id"] for f in entry["guardrail_flags"]}
+    assert "recent_drawdown_context" in flags
+
+
+def test_high_position_concentration_manual_review():
+    entry = build_decision_journal_entry(_decision(position_context={"current_position_pct": 0.20, "sector_exposure_pct": 0.10}), "2026-04-30", None)
+    assert entry["severity"] == "manual_review"
+    assert entry["cooling_off_suggestion"] == "manual_review_before_action"
+
+
+def test_high_sector_exposure_manual_review():
+    entry = build_decision_journal_entry(_decision(position_context={"current_position_pct": 0.05, "sector_exposure_pct": 0.45}), "2026-04-30", None)
+    assert entry["severity"] == "manual_review"
+
+
+def test_missing_memory_pack_emits_flag():
+    entry = build_decision_journal_entry(_decision(urgency="low", boss_confidence=0.5), "2026-04-30", None)
+    flags = {f["flag_id"] for f in entry["guardrail_flags"]}
+    assert "missing_memory_pack" in flags
+
+
+def test_p40_risk_memory_propagates_quality_red_flags():
+    memory = {"pack_id": "p1", "source_hash": "h1", "risk_memory": ["quality_red_flags_present"], "missing_context": [], "recurring_themes": []}
+    entry = build_decision_journal_entry(_decision(urgency="low", boss_confidence=0.5), "2026-04-30", memory)
+    flags = {f["flag_id"] for f in entry["guardrail_flags"]}
+    assert "quality_red_flags_present" in flags
+    assert entry["severity"] == "manual_review"
+
+
+def test_p40_risk_memory_propagates_negative_outcome():
+    memory = {"pack_id": "p1", "source_hash": "h1", "risk_memory": ["negative_outcome_history"], "missing_context": [], "recurring_themes": []}
+    entry = build_decision_journal_entry(_decision(urgency="low", boss_confidence=0.5), "2026-04-30", memory)
+    flags = {f["flag_id"] for f in entry["guardrail_flags"]}
+    assert "negative_outcome_memory" in flags
+
+
+def test_cooling_off_follows_severity():
+    # slow_down with drawdown → recheck_next_session
+    entry = build_decision_journal_entry(_decision(recent_pnl_state="drawdown", urgency="low", boss_confidence=0.5), "2026-04-30", None)
+    assert entry["cooling_off_suggestion"] == "recheck_next_session"
+
+    # slow_down without drawdown/time_pressure → recheck_after_30_minutes
+    entry2 = build_decision_journal_entry(_decision(urgency="high", boss_confidence=0.90, time_pressure=None, recent_pnl_state=None), "2026-04-30", None)
+    assert entry2["cooling_off_suggestion"] == "recheck_after_30_minutes"
+
+    # info → none
+    entry3 = build_decision_journal_entry(_decision(urgency="low", boss_confidence=0.3, time_pressure=None, recent_pnl_state=None, position_context={}), "2026-04-30", {"pack_id": "p1", "source_hash": "h1", "risk_memory": [], "missing_context": [], "recurring_themes": []})
+    assert entry3["cooling_off_suggestion"] == "none"
+
+
+def test_source_hash_changes_when_boss_input_changes():
+    first = build_decision_journal_entry(_decision(stated_reason="first"), "2026-04-30", None)
+    second = build_decision_journal_entry(_decision(stated_reason="second"), "2026-04-30", None)
+    assert first["source_hash"] != second["source_hash"]
+
+
+def test_source_hash_changes_when_memory_source_changes():
+    decision = _decision()
+    first = build_decision_journal_entry(decision, "2026-04-30", {"pack_id": "p1", "source_hash": "h1"})
+    second = build_decision_journal_entry(decision, "2026-04-30", {"pack_id": "p1", "source_hash": "h2"})
+    assert first["source_hash"] != second["source_hash"]
+
+
+def test_disclaimer_contains_required_phrase():
+    entry = build_decision_journal_entry(_decision(), "2026-04-30", None)
+    assert "behavioral guardrail evidence only" in entry["disclaimer"]
+
+
+# ── P41-B persistence and artifact tests ─────────────────────────────────
+
+from agent.research_v1.data.database import ResearchDatabase
+from agent.research_v1.decision_journal_guardrails import write_decision_journal_artifacts
+
+
+def _db(tmp_path: Path) -> ResearchDatabase:
+    db = ResearchDatabase(str(tmp_path / "research.db"))
+    db.initialize()
+    db.initialize_decision_journal_schema()
+    return db
+
+
+def test_decision_journal_persistence_is_idempotent(tmp_path: Path):
+    db = _db(tmp_path)
+    entry = build_decision_journal_entry(_decision(), "2026-04-30", None)
+    first = db.save_decision_journal_entry(entry)
+    second = db.save_decision_journal_entry(entry)
+    rows = db.list_decision_journal_entries(ticker="AAPL", as_of_date="2026-04-30")
+    assert first == second
+    assert len(rows) == 1
+
+
+def test_decision_journal_revised_source_hash_appends(tmp_path: Path):
+    db = _db(tmp_path)
+    first_entry = build_decision_journal_entry(_decision(stated_reason="first"), "2026-04-30", None)
+    second_entry = build_decision_journal_entry(_decision(stated_reason="second"), "2026-04-30", None)
+    first = db.save_decision_journal_entry(first_entry)
+    second = db.save_decision_journal_entry(second_entry)
+    rows = db.list_decision_journal_entries(ticker="AAPL", as_of_date="2026-04-30")
+    assert first != second
+    assert len(rows) == 2
+
+
+def test_decision_journal_artifacts_are_written_and_safe(tmp_path: Path):
+    entry = build_decision_journal_entry(_decision(), "2026-04-30", None)
+    payload = {
+        "schema_version": P41_SCHEMA_VERSION,
+        "as_of_date": "2026-04-30",
+        "created_at": entry["created_at"],
+        "source": "fixture",
+        "status": "completed",
+        "entries": [entry],
+        "summary": {"entry_count": 1, "manual_review_count": 0, "slow_down_count": 1},
+        "warnings": [],
+        "disclaimer": entry["disclaimer"],
+    }
+    paths = write_decision_journal_artifacts(payload, tmp_path / "output" / "governance" / "2026-04-30")
+    text = paths["md"].read_text(encoding="utf-8").lower()
+    assert paths["json"].name == "p41_decision_journal.json"
+    assert "p41 is behavioral guardrail evidence only" in text
+    assert "trade now" not in text
+
+
+# ── P41-C run orchestration and hard-boundary tests ──────────────────────
+
+from agent.research_v1.decision_journal_guardrails import run_decision_journal_guardrails
+
+
+def test_run_decision_journal_guardrails_persists_and_writes_artifacts(tmp_path: Path):
+    db = _db(tmp_path)
+    payload = {"as_of_date": "2026-04-30", "source": "fixture", "decisions": [_decision()]}
+    result = run_decision_journal_guardrails(db, payload, as_of_date="2026-04-30", output_root=tmp_path / "output" / "governance")
+    assert result["entry_count"] == 1
+    assert (Path(result["output_dir"]) / "p41_decision_journal.json").exists()
+
+
+def test_p41_hard_boundaries_are_explicit():
+    from agent.research_v1 import decision_journal_guardrails as p41
+    forbidden_names = {
+        "broker", "order", "train_model", "scheduler", "notification",
+        "HermesResearchApp", "run_research", "final_judge", "JudgeInputPacket",
+        "CanonicalSignal", "CanonicalReport", "run_governance_runtime",
+        "run_recommendation_outcome_tracking", "run_market_regime_context",
+        "run_fundamental_quality", "run_candidate_pool", "run_research_memory_pack",
+        "_extract_thesis_inputs",
+    }
+    assert not (forbidden_names & set(p41.__dict__))
+    assert "behavioral guardrail evidence only" in p41.P41_ARTIFACT_DISCLAIMER
+
+
+# ── Audit fix regression tests ───────────────────────────────────────────
+
+def test_invalid_decision_intent_is_blocked():
+    errors = validate_decision_item(_decision(decision_intent="yolo"))
+    assert "invalid_decision_intent" in errors
+
+
+def test_missing_stated_reason_blocks_at_runtime(tmp_path: Path):
+    db = _db(tmp_path)
+    bad_decision = _decision()
+    del bad_decision["stated_reason"]
+    payload = {"as_of_date": "2026-04-30", "source": "fixture", "decisions": [bad_decision]}
+    result = run_decision_journal_guardrails(db, payload, as_of_date="2026-04-30", output_root=tmp_path / "output")
+    assert result["status"] == "blocked_invalid_input"
+
+
+def test_negative_outcome_in_recurring_themes_triggers_guardrail():
+    memory = {"pack_id": "p1", "source_hash": "h1", "risk_memory": [], "missing_context": [], "recurring_themes": ["negative_outcome_history"]}
+    entry = build_decision_journal_entry(_decision(urgency="low", boss_confidence=0.5), "2026-04-30", memory)
+    flags = {f["flag_id"] for f in entry["guardrail_flags"]}
+    assert "negative_outcome_memory" in flags
+
+
+def test_stale_research_in_risk_memory_triggers_guardrail():
+    memory = {"pack_id": "p1", "source_hash": "h1", "risk_memory": ["stale_research_context"], "missing_context": [], "recurring_themes": []}
+    entry = build_decision_journal_entry(_decision(urgency="low", boss_confidence=0.5), "2026-04-30", memory)
+    flags = {f["flag_id"] for f in entry["guardrail_flags"]}
+    assert "stale_research_memory" in flags
+
+
+def test_cosmetic_ticker_difference_does_not_change_source_hash():
+    first = build_decision_journal_entry(_decision(ticker=" aapl "), "2026-04-30", None)
+    second = build_decision_journal_entry(_decision(ticker="AAPL"), "2026-04-30", None)
+    assert first["source_hash"] == second["source_hash"]

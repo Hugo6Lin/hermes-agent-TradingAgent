@@ -1229,11 +1229,11 @@ class ResearchDatabase:
             conn.close()
 
     def list_canonical_signals(self, limit: int = 20) -> list[dict]:
-        """List canonical signals ordered by newest first."""
+        """List canonical signals ordered by newest first with signal_id tie-breaker."""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM canonical_signals ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM canonical_signals ORDER BY created_at DESC, signal_id LIMIT ?",
             (limit,),
         )
         rows = cursor.fetchall()
@@ -1675,3 +1675,950 @@ class ResearchDatabase:
             return _get(conn, snapshot_id)
         finally:
             conn.close()
+
+    # ── P36 Canonical Recommendation Outcomes ──────────────────────────────────
+
+    def initialize_canonical_outcome_schema(self) -> None:
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS canonical_recommendation_outcomes (
+                    canonical_outcome_id TEXT PRIMARY KEY,
+                    schema_version TEXT NOT NULL,
+                    signal_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    ticker TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    rating TEXT NOT NULL,
+                    horizon_days INTEGER NOT NULL,
+                    calendar TEXT NOT NULL,
+                    entry_rule TEXT NOT NULL,
+                    entry_price REAL,
+                    entry_date TEXT,
+                    exit_price REAL,
+                    exit_date TEXT,
+                    target_reached INTEGER NOT NULL DEFAULT 0,
+                    stop_breached INTEGER NOT NULL DEFAULT 0,
+                    target_reached_before_stop INTEGER NOT NULL DEFAULT 0,
+                    benchmark_return_pct REAL,
+                    gross_return_pct REAL,
+                    net_return_pct REAL,
+                    max_drawdown_pct REAL,
+                    win INTEGER NOT NULL DEFAULT 0,
+                    win_definition TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    evaluation_proxy TEXT NOT NULL DEFAULT 'none',
+                    cost_basis TEXT NOT NULL DEFAULT 'none',
+                    cost_bps REAL NOT NULL DEFAULT 0.0,
+                    data_source TEXT NOT NULL,
+                    price_adjustment TEXT NOT NULL DEFAULT 'unknown',
+                    data_source_hash TEXT NOT NULL,
+                    path_precision TEXT NOT NULL DEFAULT 'close_only',
+                    evaluated_for_date TEXT NOT NULL,
+                    evaluated_at TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(signal_id, horizon_days, evaluated_for_date, data_source_hash),
+                    FOREIGN KEY (signal_id) REFERENCES canonical_signals(signal_id)
+                )
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def save_canonical_outcome(self, outcome: dict) -> str:
+        parts = [
+            outcome["signal_id"],
+            str(outcome["horizon_days"]),
+            outcome["evaluated_for_date"],
+            outcome["data_source_hash"],
+        ]
+        outcome_id = "outcome_" + "_".join(parts)
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT OR IGNORE INTO canonical_recommendation_outcomes (
+                    canonical_outcome_id, schema_version, signal_id, task_id, ticker,
+                    action, rating, horizon_days, calendar, entry_rule,
+                    entry_price, entry_date, exit_price, exit_date,
+                    target_reached, stop_breached, target_reached_before_stop,
+                    benchmark_return_pct, gross_return_pct, net_return_pct, max_drawdown_pct,
+                    win, win_definition, status, evaluation_proxy,
+                    cost_basis, cost_bps, data_source, price_adjustment,
+                    data_source_hash, path_precision, evaluated_for_date, evaluated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?
+                )""",
+                (
+                    outcome_id,
+                    outcome["schema_version"],
+                    outcome["signal_id"],
+                    outcome["task_id"],
+                    outcome["ticker"],
+                    outcome["action"],
+                    outcome["rating"],
+                    outcome["horizon_days"],
+                    outcome["calendar"],
+                    outcome["entry_rule"],
+                    outcome.get("entry_price"),
+                    outcome.get("entry_date"),
+                    outcome.get("exit_price"),
+                    outcome.get("exit_date"),
+                    int(outcome.get("target_reached", False)),
+                    int(outcome.get("stop_breached", False)),
+                    int(outcome.get("target_reached_before_stop", False)),
+                    outcome.get("benchmark_return_pct"),
+                    outcome.get("gross_return_pct"),
+                    outcome.get("net_return_pct"),
+                    outcome.get("max_drawdown_pct"),
+                    int(outcome.get("win", False)),
+                    outcome.get("win_definition", ""),
+                    outcome["status"],
+                    outcome.get("evaluation_proxy", "none"),
+                    outcome.get("cost_basis", "none"),
+                    outcome.get("cost_bps", 0.0),
+                    outcome.get("data_source", ""),
+                    outcome.get("price_adjustment", "unknown"),
+                    outcome["data_source_hash"],
+                    outcome.get("path_precision", "close_only"),
+                    outcome["evaluated_for_date"],
+                    outcome["evaluated_at"],
+                ),
+            )
+            conn.commit()
+            return outcome_id
+        finally:
+            conn.close()
+
+    def list_canonical_outcomes_by_signal(self, signal_id: str) -> list[dict]:
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM canonical_recommendation_outcomes WHERE signal_id = ? ORDER BY horizon_days",
+                (signal_id,),
+            )
+            rows = cursor.fetchall()
+            return [self._outcome_row_to_dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_recent_outcome_track_record(self, ticker: str, lookback_days: int = 90) -> list[dict]:
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM canonical_recommendation_outcomes
+                   WHERE ticker = ? AND evaluated_for_date >= date('now', ?)
+                   ORDER BY evaluated_for_date DESC, horizon_days""",
+                (ticker, f"-{lookback_days} days"),
+            )
+            rows = cursor.fetchall()
+            return [self._outcome_row_to_dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def summarize_outcomes_by(self, group_by: str, horizon_days: int | None = None) -> list[dict]:
+        group_column_map = {
+            "action": "action",
+            "rating": "rating",
+            "ticker": "ticker",
+            "horizon": "horizon_days",
+        }
+        if group_by not in group_column_map:
+            raise ValueError(f"unsupported group_by: {group_by}")
+        col = group_column_map[group_by]
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            where = ""
+            params: list = []
+            if horizon_days is not None:
+                where = "WHERE horizon_days = ?"
+                params.append(horizon_days)
+            cursor.execute(
+                f"""SELECT {col} as grp, COUNT(*) as sample_size,
+                    AVG(CASE WHEN win = 1 THEN 1.0 ELSE 0.0 END) as hit_rate,
+                    AVG(net_return_pct) as mean_net_return,
+                    AVG(CASE WHEN win = 1 THEN net_return_pct END) as mean_win,
+                    AVG(CASE WHEN win = 0 THEN net_return_pct END) as mean_loss,
+                    AVG(max_drawdown_pct) as average_drawdown
+                    FROM canonical_recommendation_outcomes
+                    {where}
+                    GROUP BY {col}
+                    ORDER BY sample_size DESC""",
+                params,
+            )
+            rows = cursor.fetchall()
+            return [
+                {
+                    "group": row["grp"],
+                    "sample_size": row["sample_size"],
+                    "hit_rate": row["hit_rate"],
+                    "mean_net_return": row["mean_net_return"],
+                    "mean_win": row["mean_win"],
+                    "mean_loss": row["mean_loss"],
+                    "average_drawdown": row["average_drawdown"],
+                }
+                for row in rows
+            ]
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _outcome_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "canonical_outcome_id": row["canonical_outcome_id"],
+            "schema_version": row["schema_version"],
+            "signal_id": row["signal_id"],
+            "task_id": row["task_id"],
+            "ticker": row["ticker"],
+            "action": row["action"],
+            "rating": row["rating"],
+            "horizon_days": row["horizon_days"],
+            "calendar": row["calendar"],
+            "entry_rule": row["entry_rule"],
+            "entry_price": row["entry_price"],
+            "entry_date": row["entry_date"],
+            "exit_price": row["exit_price"],
+            "exit_date": row["exit_date"],
+            "target_reached": bool(row["target_reached"]),
+            "stop_breached": bool(row["stop_breached"]),
+            "target_reached_before_stop": bool(row["target_reached_before_stop"]),
+            "benchmark_return_pct": row["benchmark_return_pct"],
+            "gross_return_pct": row["gross_return_pct"],
+            "net_return_pct": row["net_return_pct"],
+            "max_drawdown_pct": row["max_drawdown_pct"],
+            "win": bool(row["win"]),
+            "win_definition": row["win_definition"],
+            "status": row["status"],
+            "evaluation_proxy": row["evaluation_proxy"],
+            "cost_basis": row["cost_basis"],
+            "cost_bps": row["cost_bps"],
+            "data_source": row["data_source"],
+            "price_adjustment": row["price_adjustment"],
+            "data_source_hash": row["data_source_hash"],
+            "path_precision": row["path_precision"],
+            "evaluated_for_date": row["evaluated_for_date"],
+            "evaluated_at": row["evaluated_at"],
+            "created_at": row["created_at"],
+        }
+
+    # ── P37 Market Regime Snapshots ──────────────────────────────────────────
+
+    def initialize_market_regime_schema(self) -> None:
+        """Create market_regime_snapshots table."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS market_regime_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                regime_label TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                coverage_ratio REAL NOT NULL,
+                summary_json TEXT NOT NULL,
+                metrics_json TEXT NOT NULL,
+                proxy_metrics_json TEXT NOT NULL,
+                sector_rotation_json TEXT NOT NULL,
+                classification_reasons_json TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                missing_symbols_json TEXT NOT NULL,
+                stale_symbols_json TEXT NOT NULL,
+                data_source_hash TEXT NOT NULL,
+                UNIQUE(as_of_date, data_source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_market_regime_snapshot(self, snapshot: dict) -> str:
+        """Persist a market-regime snapshot. Idempotent by (as_of_date, data_source_hash)."""
+        import hashlib as _hashlib
+        natural_key = f"{snapshot['as_of_date']}|{snapshot['data_source_hash']}"
+        snapshot_id = _hashlib.sha256(natural_key.encode("utf-8")).hexdigest()[:16]
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO market_regime_snapshots (
+                snapshot_id, schema_version, as_of_date, created_at,
+                regime_label, confidence, coverage_ratio,
+                summary_json, metrics_json, proxy_metrics_json,
+                sector_rotation_json, classification_reasons_json,
+                warnings_json, missing_symbols_json, stale_symbols_json,
+                data_source_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                snapshot_id,
+                snapshot["schema_version"],
+                snapshot["as_of_date"],
+                snapshot["created_at"],
+                snapshot["regime_label"],
+                snapshot["confidence"],
+                snapshot["coverage_ratio"],
+                json.dumps(snapshot.get("summary", "")),
+                json.dumps({}),  # metrics_json placeholder
+                json.dumps(snapshot.get("proxy_metrics", {})),
+                json.dumps(snapshot.get("sector_rotation", {})),
+                json.dumps(snapshot.get("classification_reasons", [])),
+                json.dumps(snapshot.get("warnings", [])),
+                json.dumps(snapshot.get("missing_symbols", [])),
+                json.dumps(snapshot.get("stale_symbols", [])),
+                snapshot["data_source_hash"],
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return snapshot_id
+
+    def list_market_regime_snapshots(self, as_of_date: str | None = None, limit: int = 20) -> list[dict]:
+        """List persisted market-regime snapshots, optionally filtered by as_of_date."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if as_of_date:
+            cursor.execute(
+                "SELECT * FROM market_regime_snapshots WHERE as_of_date = ? ORDER BY created_at DESC LIMIT ?",
+                (as_of_date, limit),
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM market_regime_snapshots ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def list_market_regime_snapshots_as_of(self, as_of_date: str, limit: int = 1) -> list[dict]:
+        """Get the latest regime snapshot at or before the given as_of_date."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM market_regime_snapshots WHERE as_of_date <= ? ORDER BY as_of_date DESC, created_at DESC LIMIT ?",
+            (as_of_date, limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    # ── P38 Fundamental Quality Reports ──────────────────────────────────────
+
+    def initialize_fundamental_quality_schema(self) -> None:
+        """Create fundamental_quality_reports table."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fundamental_quality_reports (
+                report_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                sector TEXT,
+                currency TEXT,
+                status TEXT NOT NULL,
+                quality_label TEXT NOT NULL,
+                overall_quality_score REAL,
+                confidence REAL NOT NULL,
+                coverage_ratio REAL NOT NULL,
+                usable_row_count INTEGER NOT NULL,
+                ignored_future_row_count INTEGER NOT NULL,
+                dimension_scores_json TEXT NOT NULL,
+                latest_metrics_json TEXT NOT NULL,
+                trend_metrics_json TEXT NOT NULL,
+                red_flags_json TEXT NOT NULL,
+                missing_required_fields_json TEXT NOT NULL DEFAULT '[]',
+                warnings_json TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                UNIQUE(ticker, as_of_date, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_fundamental_quality_report(self, report: dict) -> str:
+        """Persist a fundamental-quality report. Idempotent by (ticker, as_of_date, source_hash)."""
+        import hashlib as _hashlib
+        natural_key = f"{report['ticker']}|{report['as_of_date']}|{report['source_hash']}"
+        report_id = _hashlib.sha256(natural_key.encode("utf-8")).hexdigest()[:16]
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO fundamental_quality_reports (
+                report_id, schema_version, as_of_date, created_at,
+                ticker, sector, currency,
+                status, quality_label, overall_quality_score,
+                confidence, coverage_ratio, usable_row_count, ignored_future_row_count,
+                dimension_scores_json, latest_metrics_json, trend_metrics_json,
+                red_flags_json, missing_required_fields_json, warnings_json, source_hash, summary
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                report_id,
+                report["schema_version"],
+                report["as_of_date"],
+                report["created_at"],
+                report["ticker"],
+                report.get("sector"),
+                report.get("currency"),
+                report["status"],
+                report["quality_label"],
+                report.get("overall_quality_score"),
+                report["confidence"],
+                report["coverage_ratio"],
+                report["usable_row_count"],
+                report["ignored_future_row_count"],
+                json.dumps(report.get("dimension_scores", {})),
+                json.dumps(report.get("latest_metrics", {})),
+                json.dumps(report.get("trend_metrics", {})),
+                json.dumps(report.get("red_flags", [])),
+                json.dumps(report.get("missing_required_fields", [])),
+                json.dumps(report.get("warnings", [])),
+                report["source_hash"],
+                report.get("summary", ""),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return report_id
+
+    def list_fundamental_quality_reports(
+        self,
+        ticker: str | None = None,
+        as_of_date: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """List persisted fundamental-quality reports."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        conditions: list[str] = []
+        params: list[Any] = []
+        if ticker:
+            conditions.append("ticker = ?")
+            params.append(ticker)
+        if as_of_date:
+            conditions.append("as_of_date = ?")
+            params.append(as_of_date)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+        cursor.execute(
+            f"SELECT * FROM fundamental_quality_reports {where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def list_fundamental_quality_reports_as_of(
+        self,
+        ticker: str,
+        as_of_date: str,
+        limit: int = 1,
+    ) -> list[dict]:
+        """Get the latest quality report for a ticker at or before the given as_of_date."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM fundamental_quality_reports WHERE ticker = ? AND as_of_date <= ? ORDER BY as_of_date DESC, created_at DESC LIMIT ?",
+            (ticker, as_of_date, limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def initialize_candidate_pool_schema(self) -> None:
+        """Create candidate_pool_runs and candidate_pool_items tables."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candidate_pool_runs (
+                run_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                universe_id TEXT NOT NULL,
+                source TEXT,
+                status TEXT NOT NULL,
+                candidate_count INTEGER NOT NULL,
+                excluded_count INTEGER NOT NULL,
+                source_hash TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                summary_json TEXT NOT NULL,
+                UNIQUE(as_of_date, universe_id, source_hash)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candidate_pool_items (
+                item_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                universe_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                sector TEXT,
+                currency TEXT,
+                source_date TEXT,
+                candidate_status TEXT NOT NULL,
+                candidate_category TEXT,
+                workflow_action TEXT,
+                rank INTEGER,
+                total_score REAL,
+                component_scores_json TEXT NOT NULL,
+                feature_snapshot_json TEXT NOT NULL,
+                evidence_refs_json TEXT NOT NULL,
+                inclusion_reasons_json TEXT NOT NULL,
+                risk_notes_json TEXT NOT NULL,
+                missing_context_json TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                UNIQUE(run_id, ticker, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_candidate_pool(self, pool: dict) -> str:
+        """Persist a candidate-pool run and items. Idempotent by natural key."""
+        import hashlib as _hashlib
+
+        summary = pool.get("summary", {})
+        run_id = pool.get("run_id", "")
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO candidate_pool_runs (
+                run_id, schema_version, as_of_date, created_at,
+                universe_id, source, status,
+                candidate_count, excluded_count,
+                source_hash, warnings_json, summary_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run_id,
+                pool.get("schema_version", ""),
+                pool["as_of_date"],
+                pool.get("created_at", ""),
+                pool.get("universe_id", ""),
+                pool.get("source"),
+                pool.get("status", ""),
+                summary.get("candidate_count", 0),
+                summary.get("excluded_count", 0),
+                pool.get("source_hash", run_id),
+                json.dumps(pool.get("warnings", [])),
+                json.dumps(summary),
+            ),
+        )
+
+        for i, candidate in enumerate(pool.get("candidates", [])):
+            item_key = f"{run_id}|{candidate.get('ticker', '')}|{candidate.get('source_hash', '')}"
+            item_id = _hashlib.sha256(item_key.encode("utf-8")).hexdigest()[:16]
+            cursor.execute(
+                """INSERT OR IGNORE INTO candidate_pool_items (
+                    item_id, run_id, schema_version, as_of_date, created_at,
+                    universe_id, ticker, sector, currency, source_date,
+                    candidate_status, candidate_category, workflow_action, rank,
+                    total_score, component_scores_json, feature_snapshot_json,
+                    evidence_refs_json, inclusion_reasons_json, risk_notes_json,
+                    missing_context_json, source_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    item_id,
+                    run_id,
+                    candidate.get("schema_version", ""),
+                    candidate.get("as_of_date", ""),
+                    candidate.get("created_at", ""),
+                    candidate.get("universe_id", ""),
+                    candidate.get("ticker", ""),
+                    candidate.get("sector"),
+                    candidate.get("currency"),
+                    candidate.get("source_date"),
+                    candidate.get("candidate_status", ""),
+                    candidate.get("candidate_category"),
+                    candidate.get("workflow_action"),
+                    i + 1,
+                    candidate.get("total_score"),
+                    json.dumps(candidate.get("component_scores", {})),
+                    json.dumps(candidate.get("feature_snapshot", {})),
+                    json.dumps(candidate.get("evidence_refs", {})),
+                    json.dumps(candidate.get("inclusion_reasons", [])),
+                    json.dumps(candidate.get("risk_notes", [])),
+                    json.dumps(candidate.get("missing_context", [])),
+                    candidate.get("source_hash", ""),
+                ),
+            )
+
+        conn.commit()
+        conn.close()
+        return run_id
+
+    def list_candidate_pool_runs(
+        self,
+        as_of_date: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """List persisted candidate-pool runs."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        conditions: list[str] = []
+        params: list[Any] = []
+        if as_of_date:
+            conditions.append("as_of_date = ?")
+            params.append(as_of_date)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+        cursor.execute(
+            f"SELECT * FROM candidate_pool_runs {where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def list_candidate_pool_items(self, run_id: str) -> list[dict]:
+        """List items for a specific candidate-pool run."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM candidate_pool_items WHERE run_id = ? ORDER BY rank",
+            (run_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    # ── P40 research memory pack helpers ──────────────────────────────────
+
+    def initialize_memory_pack_schema(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS research_memory_packs (
+                pack_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                lookback_days INTEGER NOT NULL,
+                memory_status TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                latest_research_json TEXT NOT NULL,
+                outcome_summary_json TEXT NOT NULL,
+                candidate_history_json TEXT NOT NULL,
+                quality_context_json TEXT NOT NULL,
+                regime_context_json TEXT NOT NULL,
+                watchlist_context_json TEXT NOT NULL,
+                validation_context_json TEXT NOT NULL,
+                recurring_themes_json TEXT NOT NULL,
+                risk_memory_json TEXT NOT NULL,
+                missing_context_json TEXT NOT NULL,
+                source_refs_json TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                UNIQUE(ticker, as_of_date, lookback_days, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_research_memory_pack(self, pack: dict) -> str:
+        self.initialize_memory_pack_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO research_memory_packs (
+                pack_id, schema_version, as_of_date, created_at, ticker,
+                lookback_days, memory_status, source_hash,
+                latest_research_json, outcome_summary_json, candidate_history_json,
+                quality_context_json, regime_context_json, watchlist_context_json,
+                validation_context_json, recurring_themes_json, risk_memory_json,
+                missing_context_json, source_refs_json, summary
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                pack["pack_id"],
+                pack["schema_version"],
+                pack["as_of_date"],
+                pack["created_at"],
+                pack["ticker"],
+                pack["lookback_days"],
+                pack["memory_status"],
+                pack["source_hash"],
+                json.dumps(pack.get("latest_research", {})),
+                json.dumps(pack.get("outcome_summary", {})),
+                json.dumps(pack.get("candidate_history", {})),
+                json.dumps(pack.get("quality_context", {})),
+                json.dumps(pack.get("regime_context", {})),
+                json.dumps(pack.get("watchlist_context", {})),
+                json.dumps(pack.get("validation_context", {})),
+                json.dumps(pack.get("recurring_themes", [])),
+                json.dumps(pack.get("risk_memory", [])),
+                json.dumps(pack.get("missing_context", [])),
+                json.dumps(pack.get("source_refs", {})),
+                f"{pack['ticker']}: {pack['memory_status']}",
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return pack["pack_id"]
+
+    def list_research_memory_packs(
+        self,
+        ticker: str | None = None,
+        as_of_date: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        self.initialize_memory_pack_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        conditions: list[str] = []
+        params: list[Any] = []
+        if ticker:
+            conditions.append("ticker = ?")
+            params.append(ticker)
+        if as_of_date:
+            conditions.append("as_of_date = ?")
+            params.append(as_of_date)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+        cursor.execute(
+            f"SELECT * FROM research_memory_packs {where} ORDER BY created_at DESC, pack_id ASC LIMIT ?",
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def list_canonical_signals_for_ticker(
+        self,
+        ticker: str,
+        as_of_date: str,
+        lookback_days: int,
+        limit: int = 5,
+    ) -> list[dict]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM canonical_signals
+               WHERE ticker = ?
+                 AND date(created_at) <= date(?)
+                 AND date(created_at) >= date(?, ?)
+               ORDER BY created_at DESC, signal_id ASC
+               LIMIT ?""",
+            (ticker, as_of_date, as_of_date, f"-{lookback_days} days", limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            d = dict(row)
+            if "risk_flags_json" in d:
+                try:
+                    d["risk_flags"] = json.loads(d["risk_flags_json"])
+                except (json.JSONDecodeError, TypeError):
+                    d["risk_flags"] = []
+            result.append(d)
+        return result
+
+    def list_canonical_reports_for_ticker(
+        self,
+        ticker: str,
+        as_of_date: str,
+        lookback_days: int,
+        limit: int = 5,
+    ) -> list[dict]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM canonical_reports
+               WHERE ticker = ?
+                 AND date(created_at) <= date(?)
+                 AND date(created_at) >= date(?, ?)
+               ORDER BY created_at DESC, report_id ASC
+               LIMIT ?""",
+            (ticker, as_of_date, as_of_date, f"-{lookback_days} days", limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            d = dict(row)
+            for json_col in ("trade_plan_json", "decision_card_json", "instrument_rec_json"):
+                if json_col in d:
+                    try:
+                        d[json_col.replace("_json", "")] = json.loads(d[json_col])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            result.append(d)
+        return result
+
+    def list_candidate_pool_items_for_ticker(
+        self,
+        ticker: str,
+        as_of_date: str,
+        lookback_days: int,
+        limit: int = 5,
+    ) -> list[dict]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM candidate_pool_items
+               WHERE ticker = ?
+                 AND date(created_at) <= date(?)
+                 AND date(created_at) >= date(?, ?)
+               ORDER BY created_at DESC, item_id ASC
+               LIMIT ?""",
+            (ticker, as_of_date, as_of_date, f"-{lookback_days} days", limit),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_watchlist_entry_for_ticker(self, ticker: str) -> dict | None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM watchlist_entries WHERE ticker = ?",
+            (ticker,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_validation_result_for_ticker(self, ticker: str) -> dict | None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM validation_results WHERE ticker = ?",
+            (ticker,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    # ── P41 decision journal helpers ──────────────────────────────────────
+
+    def initialize_decision_journal_schema(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS decision_journal_entries (
+                journal_id TEXT PRIMARY KEY,
+                schema_version TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                contemplated_action TEXT NOT NULL,
+                decision_intent TEXT NOT NULL,
+                boss_confidence REAL,
+                urgency TEXT,
+                severity TEXT NOT NULL,
+                cooling_off_suggestion TEXT NOT NULL,
+                memory_pack_id TEXT,
+                source_hash TEXT NOT NULL,
+                entry_json TEXT NOT NULL,
+                UNIQUE(ticker, as_of_date, contemplated_action, source_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_decision_journal_entry(self, entry: dict) -> str:
+        self.initialize_decision_journal_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO decision_journal_entries (
+                journal_id, schema_version, as_of_date, created_at,
+                ticker, contemplated_action, decision_intent,
+                boss_confidence, urgency, severity,
+                cooling_off_suggestion, memory_pack_id,
+                source_hash, entry_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                entry["journal_id"],
+                entry["schema_version"],
+                entry["as_of_date"],
+                entry["created_at"],
+                entry["ticker"],
+                entry["contemplated_action"],
+                entry["decision_intent"],
+                entry.get("boss_confidence"),
+                entry.get("urgency"),
+                entry["severity"],
+                entry["cooling_off_suggestion"],
+                entry.get("memory_ref", {}).get("pack_id", ""),
+                entry["source_hash"],
+                json.dumps(entry),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return entry["journal_id"]
+
+    def list_decision_journal_entries(
+        self,
+        ticker: str | None = None,
+        as_of_date: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        self.initialize_decision_journal_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        conditions: list[str] = []
+        params: list[Any] = []
+        if ticker:
+            conditions.append("ticker = ?")
+            params.append(ticker)
+        if as_of_date:
+            conditions.append("as_of_date = ?")
+            params.append(as_of_date)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+        cursor.execute(
+            f"SELECT * FROM decision_journal_entries {where} ORDER BY created_at DESC, journal_id ASC LIMIT ?",
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_latest_research_memory_pack(self, ticker: str, as_of_date: str) -> dict | None:
+        self.initialize_memory_pack_schema()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM research_memory_packs
+               WHERE ticker = ? AND as_of_date <= ?
+               ORDER BY as_of_date DESC, created_at DESC, pack_id ASC
+               LIMIT 1""",
+            (ticker, as_of_date),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        d = dict(row)
+        # Decode JSON columns back into P40 pack shape
+        for col in (
+            "latest_research_json", "outcome_summary_json", "candidate_history_json",
+            "quality_context_json", "regime_context_json", "watchlist_context_json",
+            "validation_context_json", "recurring_themes_json", "risk_memory_json",
+            "missing_context_json", "source_refs_json",
+        ):
+            key = col.replace("_json", "")
+            try:
+                d[key] = json.loads(d.pop(col, "null") or "null")
+            except (json.JSONDecodeError, TypeError):
+                d[key] = [] if "themes" in col or "risk" in col or "missing" in col else {}
+        return d

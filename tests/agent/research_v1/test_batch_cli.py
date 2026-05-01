@@ -320,3 +320,438 @@ def test_governance_run_cli_default_output_root_uses_app_root(tmp_path: Path, ca
     out = capsys.readouterr().out
     assert result == 0
     assert str(tmp_path / "output" / "governance") in out
+
+
+def test_outcome_run_cli_success_writes_p36_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "p36_recommendation_outcomes.json").write_text("{}", encoding="utf-8")
+        (output_dir / "p36_recommendation_outcomes.md").write_text("# P36", encoding="utf-8")
+        return {
+            "status": "completed",
+            "output_dir": str(output_dir),
+            "outcome_rows_written": 1,
+            "duplicate_rows_skipped": 0,
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_recommendation_outcome_tracking", fake_run)
+
+    code = main([
+        "--app-root", str(app_root),
+        "outcome-run",
+        "--as-of-date", "2026-04-30",
+        "--limit", "10",
+        "--flat-cost-bps", "0",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Outcome tracking status: completed" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_outcome_run_cli_rejects_negative_limit(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    code = main([
+        "--app-root", str(app_root),
+        "outcome-run",
+        "--as-of-date", "2026-04-30",
+        "--limit", "-1",
+    ])
+
+    assert code == 2
+    assert "invalid outcome-run input" in capsys.readouterr().out
+
+
+# ── P37 market-regime-run CLI tests ──────────────────────────────────────────
+
+def test_market_regime_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "p37_market_regime_snapshot.json").write_text("{}", encoding="utf-8")
+        (output_dir / "p37_market_regime_snapshot.md").write_text("# P37", encoding="utf-8")
+        return {
+            "status": "completed",
+            "output_dir": str(output_dir),
+            "regime_label": "risk_on_broad",
+            "confidence": 0.82,
+            "missing_symbols": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_market_regime_context", fake_run)
+
+    code = main([
+        "--app-root", str(app_root),
+        "market-regime-run",
+        "--as-of-date", "2026-04-30",
+        "--lookback-days", "90",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Market regime status: completed" in out
+    assert "risk_on_broad" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_market_regime_run_cli_rejects_invalid_inputs(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+
+    code = main([
+        "--app-root", str(app_root),
+        "market-regime-run",
+        "--as-of-date", "bad-date",
+        "--lookback-days", "-1",
+    ])
+
+    assert code == 2
+    assert "invalid market-regime-run input" in capsys.readouterr().out
+
+
+# ── P38 fundamental-quality-run CLI tests ────────────────────────────────────
+
+def test_fundamental_quality_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "fundamentals.json"
+    input_path.write_text('{"as_of_date":"2026-04-30","tickers":[]}', encoding="utf-8")
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "p38_fundamental_quality.json").write_text("{}", encoding="utf-8")
+        (output_dir / "p38_fundamental_quality.md").write_text("# P38", encoding="utf-8")
+        return {
+            "status": "completed",
+            "output_dir": str(output_dir),
+            "report_count": 1,
+            "blocked_count": 0,
+            "warning_count": 0,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_fundamental_quality", fake_run)
+
+    code = main([
+        "--app-root", str(app_root),
+        "fundamental-quality-run",
+        "--input", str(input_path),
+        "--as-of-date", "2026-04-30",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Fundamental quality status: completed" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_fundamental_quality_run_cli_rejects_invalid_json(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "bad.json"
+    input_path.write_text("{bad", encoding="utf-8")
+
+    code = main([
+        "--app-root", str(app_root),
+        "fundamental-quality-run",
+        "--input", str(input_path),
+        "--as-of-date", "2026-04-30",
+    ])
+
+    assert code == 2
+    assert "invalid fundamental-quality-run input" in capsys.readouterr().out
+
+
+def test_fundamental_quality_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "fundamentals.json"
+    input_path.write_text('{"as_of_date":"2026-04-30","tickers":[]}', encoding="utf-8")
+
+    code = main([
+        "--app-root", str(app_root),
+        "fundamental-quality-run",
+        "--input", str(input_path),
+        "--as-of-date", "not-a-date",
+    ])
+
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "invalid fundamental-quality-run input" in out
+    assert "date" in out.lower()
+
+
+def test_fundamental_quality_run_cli_rejects_non_dict_ticker_item(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "fundamentals.json"
+    input_path.write_text('{"as_of_date":"2026-04-30","tickers":["AAPL"]}', encoding="utf-8")
+
+    code = main([
+        "--app-root", str(app_root),
+        "fundamental-quality-run",
+        "--input", str(input_path),
+        "--as-of-date", "2026-04-30",
+    ])
+
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "invalid fundamental-quality-run input" in out
+    assert "ticker" in out.lower()
+
+
+# ── P39 candidate-pool-run CLI tests ─────────────────────────────────────────
+
+def test_candidate_pool_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "universe.json"
+    input_path.write_text(
+        '{"as_of_date":"2026-04-30","source":"fixture","universe_id":"u1","tickers":[]}',
+        encoding="utf-8",
+    )
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "no_candidates",
+            "output_dir": str(output_dir),
+            "candidate_count": 0,
+            "excluded_count": 0,
+            "top_candidate": "",
+            "warning_count": 0,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_candidate_pool", fake_run)
+
+    code = main([
+        "--app-root", str(app_root),
+        "candidate-pool-run",
+        "--input", str(input_path),
+        "--as-of-date", "2026-04-30",
+    ])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Candidate pool status: no_candidates" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_candidate_pool_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "universe.json"
+    input_path.write_text(
+        '{"as_of_date":"2026-04-30","source":"fixture","universe_id":"u1","tickers":[]}',
+        encoding="utf-8",
+    )
+
+    code = main([
+        "--app-root", str(app_root),
+        "candidate-pool-run",
+        "--input", str(input_path),
+        "--as-of-date", "not-a-date",
+    ])
+
+    assert code == 2
+    assert "invalid candidate-pool-run input" in capsys.readouterr().out
+
+
+def test_candidate_pool_run_cli_rejects_non_dict_ticker(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "universe.json"
+    input_path.write_text(
+        '{"as_of_date":"2026-04-30","source":"fixture","universe_id":"u1","tickers":["AAPL"]}',
+        encoding="utf-8",
+    )
+
+    code = main([
+        "--app-root", str(app_root),
+        "candidate-pool-run",
+        "--input", str(input_path),
+        "--as-of-date", "2026-04-30",
+    ])
+
+    assert code == 2
+    assert "invalid candidate-pool-run input" in capsys.readouterr().out
+
+
+def test_candidate_pool_run_cli_rejects_negative_max_candidates(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    input_path = tmp_path / "universe.json"
+    input_path.write_text(
+        '{"as_of_date":"2026-04-30","source":"fixture","universe_id":"u1","tickers":[]}',
+        encoding="utf-8",
+    )
+
+    code = main([
+        "--app-root", str(app_root),
+        "candidate-pool-run",
+        "--input", str(input_path),
+        "--max-candidates", "-1",
+    ])
+
+    assert code == 2
+    assert "invalid candidate-pool-run input" in capsys.readouterr().out
+
+
+# ── P40 memory-pack-run CLI tests ────────────────────────────────────────
+
+def test_memory_pack_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "completed",
+            "output_dir": str(output_dir),
+            "ticker_count": 1,
+            "memory_available": 0,
+            "limited_memory": 0,
+            "no_prior_memory": 1,
+            "warning_count": 0,
+        }
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_research_memory_pack", fake_run)
+
+    code = main(["--app-root", str(app_root), "memory-pack-run", "--tickers", "aapl", "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Research memory status: completed" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_memory_pack_run_cli_rejects_empty_tickers(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "memory-pack-run", "--tickers", " , ", "--as-of-date", "2026-04-30"])
+
+    assert code == 2
+    assert "invalid memory-pack-run input" in capsys.readouterr().out
+
+
+def test_memory_pack_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "memory-pack-run", "--tickers", "AAPL", "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid date format" in capsys.readouterr().out
+
+
+def test_memory_pack_run_cli_requires_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "memory-pack-run", "--tickers", "AAPL"])
+
+    assert code == 2
+    assert "--as-of-date is required" in capsys.readouterr().out
+
+
+def test_memory_pack_run_cli_rejects_negative_lookback(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "memory-pack-run", "--tickers", "AAPL", "--as-of-date", "2026-04-30", "--lookback-days", "-1"])
+
+    assert code == 2
+    assert "lookback-days must be positive" in capsys.readouterr().out
+
+
+# ── P41 decision-journal-run CLI tests ───────────────────────────────────
+
+def test_decision_journal_run_cli_success_writes_artifacts(tmp_path, monkeypatch, capsys):
+    from agent.research_v1.batch_cli import main
+
+    app_root = tmp_path / "app"
+    input_path = tmp_path / "journal.json"
+    input_path.write_text(
+        '{"as_of_date":"2026-04-30","source":"fixture","decisions":[{"ticker":"AAPL","contemplated_action":"research_candidate","decision_intent":"review_before_action","stated_reason":"fixture","boss_confidence":0.8,"urgency":"high"}]}',
+        encoding="utf-8",
+    )
+
+    def fake_run(**kwargs):
+        output_dir = kwargs["output_root"] / "2026-04-30"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {"status": "completed", "output_dir": str(output_dir), "entry_count": 1, "manual_review_count": 0, "slow_down_count": 1, "warning_count": 0}
+
+    monkeypatch.setattr("agent.research_v1.batch_cli.run_decision_journal_guardrails", fake_run)
+    code = main(["--app-root", str(app_root), "decision-journal-run", "--input", str(input_path), "--as-of-date", "2026-04-30"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Decision journal status: completed" in out
+    assert str(app_root / "output" / "governance" / "2026-04-30") in out
+
+
+def test_decision_journal_run_cli_rejects_invalid_date(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    input_path = tmp_path / "journal.json"
+    input_path.write_text('{"decisions":[]}', encoding="utf-8")
+    code = main(["--app-root", str(tmp_path), "decision-journal-run", "--input", str(input_path), "--as-of-date", "not-a-date"])
+
+    assert code == 2
+    assert "invalid date format" in capsys.readouterr().out
+
+
+def test_decision_journal_run_cli_rejects_empty_decisions(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    input_path = tmp_path / "journal.json"
+    input_path.write_text('{"as_of_date":"2026-04-30","decisions":[]}', encoding="utf-8")
+    code = main(["--app-root", str(tmp_path), "decision-journal-run", "--input", str(input_path)])
+
+    assert code == 2
+    assert "missing or empty" in capsys.readouterr().out
+
+
+def test_decision_journal_run_cli_rejects_missing_file(tmp_path, capsys):
+    from agent.research_v1.batch_cli import main
+
+    code = main(["--app-root", str(tmp_path), "decision-journal-run", "--input", "/nonexistent/journal.json"])
+
+    assert code == 2
+    assert "file not found" in capsys.readouterr().out
